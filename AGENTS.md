@@ -32,8 +32,44 @@
 - Use `.github/instructions/tests.instructions.md` for backend test work.
 - Use `.github/instructions/qa_readonly.instructions.md` for read-only review
   and audit tasks.
-- Project-scoped agents live under `.github/agents/`.
-- Project-scoped skills live under `.github/skills/`.
+
+## Project-Scoped Agents
+
+Project-scoped agent definitions live under `.github/agents/`. When a task
+matches one of these specialties, load the matching agent file before acting or
+before delegating to a similarly named runtime agent:
+
+- `.github/agents/vessel-detection-engineer.agent.md` for HeatSync backend
+  modules, data contracts, control, prediction, anomaly detection, impact
+  calculations, and API work.
+- `.github/agents/signal-processing-engineer.agent.md` for backend
+  calculations, prediction logic, anomaly thresholds, numeric stability, and
+  data transformation work.
+- `.github/agents/analysis-eval-engineer.agent.md` for backend data paths,
+  fixtures, generated outputs, evaluation summaries, scripts, and reporting
+  utilities.
+- `.github/agents/test-engineer.agent.md` for backend tests, deterministic
+  fixtures, regression tests, quality gates, and verification strategy.
+- `.github/agents/code-reviewer.agent.md` for read-only review of backend
+  correctness, regressions, data-contract risks, security, performance, and
+  missing tests.
+- `.github/agents/docs-maintainer.agent.md` for README updates, agent
+  instruction files, setup guidance, GitHub metadata, and repository docs.
+
+## Project-Scoped Skills
+
+Project-scoped skills live under `.github/skills/`. When a task names one of
+these skills or clearly matches its description, load its `SKILL.md` before
+acting:
+
+- `.github/skills/python-linting/SKILL.md` for backend Python linting,
+  formatting checks, type checks, security scans, dependency audits, and Python
+  compile validation.
+- `.github/skills/python-testing/SKILL.md` for backend-aware pytest target
+  selection, regression tests, deterministic fixtures, and failure debugging.
+- `.github/skills/vessel-contract-check/SKILL.md` for backend schema,
+  data-contract, calculation, control, prediction, anomaly, output, API, and
+  dataset-risk checks.
 
 ## GitHub Automation
 
