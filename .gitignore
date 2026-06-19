@@ -219,5 +219,5 @@ __marimo__/
 
 
 # data files
-data/*
+backend/data/*
 !data/.gitkeep
