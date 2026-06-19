@@ -1,0 +1,150 @@
+default_stages: [manual]
+exclude: '^(\.agents/|\.codex/|\.github/|\.gsd/|\.skills/|\.skillss/|\.venv/|build/|dist/|mutants/|skills/)'
+
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.6.0
+    hooks:
+      - id: trailing-whitespace
+        files: ^backend/.*\.py$
+      - id: end-of-file-fixer
+        files: ^backend/.*\.py$
+      - id: check-yaml
+        files: ^backend/.*\.ya?ml$
+      - id: check-toml
+        files: ^backend/.*\.toml$
+      - id: check-added-large-files
+        files: ^backend/
+      - id: check-merge-conflict
+        files: ^backend/
+      - id: debug-statements
+        files: ^backend/.*\.py$
+
+  - repo: local
+    hooks:
+      - id: backend-ruff-check
+        name: Backend Ruff lint
+        entry: uv run --project backend ruff check --config backend/pyproject.toml backend
+        language: system
+        stages: [manual]
+        pass_filenames: false
+        always_run: true
+
+      - id: backend-ruff-format
+        name: Backend Ruff format check
+        entry: uv run --project backend ruff format --config backend/pyproject.toml --check backend
+        language: system
+        stages: [manual]
+        pass_filenames: false
+        always_run: true
+
+      - id: backend-mypy
+        name: Backend Mypy
+        entry: uv run --project backend mypy --config-file backend/pyproject.toml backend
+        language: system
+        stages: [manual]
+        pass_filenames: false
+        always_run: true
+
+      - id: backend-bandit
+        name: Backend Bandit
+        entry: uv run --project backend bandit -q -r backend -x backend/.venv,backend/tests
+        language: system
+        stages: [manual]
+        pass_filenames: false
+        always_run: true
+
+      - id: backend-uv-audit
+        name: Backend uv audit
+        entry: uv audit --project backend --preview-features audit
+        language: system
+        stages: [manual]
+        pass_filenames: false
+        always_run: true
+
+      - id: backend-py-compile
+        name: Backend py_compile
+        entry: >-
+          bash -c 'mapfile -t py_files < <(git ls-files "backend/*.py" "backend/**/*.py" | sort -u);
+          if [ "${#py_files[@]}" -eq 0 ]; then echo "No backend Python files found; skipping py_compile."; exit 0; fi;
+          uv run --project backend python -m py_compile "${py_files[@]}"'
+        language: system
+        stages: [manual]
+        pass_filenames: false
+        always_run: true
+
+      - id: backend-pytest
+        name: Backend pytest
+        entry: >-
+          bash -c 'mapfile -t test_files < <(git ls-files "backend/test_*.py" "backend/*_test.py" "backend/**/test_*.py" "backend/**/*_test.py" | sort -u);
+          if [ "${#test_files[@]}" -eq 0 ]; then echo "No backend tests found; skipping pytest."; exit 0; fi;
+          uv run --project backend pytest "${test_files[@]}" -q'
+        language: system
+        stages: [manual]
+        pass_filenames: false
+        always_run: true
+
+      - id: backend-aps-gherkin-parse
+        name: Backend APS/Gherkin parse and IR DRY
+        entry: bash .github/scripts/precommit_aps_gate.sh
+        language: system
+        stages: [manual]
+        pass_filenames: false
+        always_run: true
+
+      - id: backend-tests-coverage
+        name: Backend tests with coverage
+        entry: bash .github/scripts/precommit_coverage_gate.sh
+        language: system
+        stages: [manual]
+        pass_filenames: false
+        always_run: true
+
+      - id: backend-crap-cleaner
+        name: Backend CRAP risk hardening check
+        entry: >-
+          bash -c 'mapfile -t test_files < <(git ls-files "backend/test_*.py" "backend/*_test.py" "backend/**/test_*.py" "backend/**/*_test.py" | sort -u);
+          if [ "${#test_files[@]}" -eq 0 ]; then echo "No backend tests found; skipping CRAP gate."; exit 0; fi;
+          if [ ! -f build/slow-lane/coverage.json ]; then echo "Coverage JSON missing; run backend-tests-coverage first."; exit 1; fi;
+          mapfile -t python_files < <(git ls-files "backend/*.py" "backend/**/*.py" | grep -Ev "(^|/)tests?/|(^|/)test_[^/]+\.py$|(^|/)[^/]+_test\.py$" | sort -u);
+          if [ "${#python_files[@]}" -eq 0 ]; then echo "No backend production Python files found."; exit 1; fi;
+          uv run --project backend python .github/scripts/crap_check.py --coverage-json build/slow-lane/coverage.json --max-score 6 "${python_files[@]}"'
+        language: system
+        stages: [manual]
+        pass_filenames: false
+        always_run: true
+        require_serial: true
+
+      - id: backend-dry-cleaner
+        name: Backend DRY structural hardening check
+        entry: >-
+          bash -c 'mapfile -t python_files < <(git ls-files "backend/*.py" "backend/**/*.py" | grep -Ev "(^|/)tests?/|(^|/)test_[^/]+\.py$|(^|/)[^/]+_test\.py$" | sort -u);
+          if [ "${#python_files[@]}" -eq 0 ]; then echo "No backend production Python files found."; exit 1; fi;
+          uv run --project backend python .github/scripts/dry_check.py --min-lines 8 --max-groups 0 "${python_files[@]}"'
+        language: system
+        stages: [manual]
+        pass_filenames: false
+        always_run: true
+        require_serial: true
+
+      - id: backend-language-mutation
+        name: Backend language mutation
+        entry: >-
+          bash -c 'if ! uv run --project backend python -c "import mutmut" >/dev/null 2>&1; then echo "mutmut is not installed; skipping language mutation."; exit 0; fi;
+          mapfile -t test_files < <(git ls-files "backend/test_*.py" "backend/*_test.py" "backend/**/test_*.py" "backend/**/*_test.py" | sort -u);
+          if [ "${#test_files[@]}" -eq 0 ]; then echo "No backend tests found; skipping language mutation."; exit 0; fi;
+          uv run --project backend python .github/scripts/precommit_language_mutation_gate.py'
+        language: system
+        stages: [manual]
+        pass_filenames: false
+        always_run: true
+        require_serial: true
+
+      - id: backend-gherkin-mutation
+        name: Backend soft Gherkin mutation
+        entry: bash .github/scripts/precommit_gherkin_mutation_gate.sh
+        language: system
+        stages: [manual]
+        pass_filenames: false
+        always_run: true
+        require_serial: true
