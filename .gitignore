@@ -94,14 +94,13 @@ backend/data/*
 # Snakemake
 .snakemake/
 
-<<<<<<< HEAD
 # Outputs
 plots/
 mutants
 dummy_output
 .codex
 deep-research-report.md
-=======
+
 # pytype static type analyzer
 .pytype/
 
@@ -179,4 +178,6 @@ heatsync-failure-simulation-backup-*/
 tmp/
 temp/
 .cache/
->>>>>>> feat/early-warning-simulation
+
+# ── GSD baseline (auto-generated) ──
+.gsd
