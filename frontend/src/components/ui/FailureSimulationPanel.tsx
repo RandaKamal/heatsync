@@ -1,4 +1,3 @@
-import type { SimulationSpeed } from '../../hooks/useFailureSimulation'
 import type {
   FailureSimulationStatus,
   SimulationSeverity,
@@ -6,21 +5,11 @@ import type {
 
 interface FailureSimulationPanelProps {
   status: FailureSimulationStatus
-  isRunning: boolean
-  isPaused: boolean
-  speed: SimulationSpeed
-  onSpeedChange: (speed: SimulationSpeed) => void
-  onPlay: () => void
-  onPause: () => void
-  onResume: () => void
-  onRestart: () => void
+  onStepToNextPhase: () => void
   onReset: () => void
 }
 
-const SEVERITY_LABELS: Record<
-  SimulationSeverity,
-  string
-> = {
+const SEVERITY_LABELS: Record<SimulationSeverity, string> = {
   none: 'Normal',
   information: 'Information',
   warning: 'Watching',
@@ -35,14 +24,7 @@ function formatTime(seconds: number): string {
 
 export function FailureSimulationPanel({
   status,
-  isRunning,
-  isPaused,
-  speed,
-  onSpeedChange,
-  onPlay,
-  onPause,
-  onResume,
-  onRestart,
+  onStepToNextPhase,
   onReset,
 }: FailureSimulationPanelProps) {
   const hasStarted = status.elapsedSeconds > 0
@@ -67,46 +49,14 @@ export function FailureSimulationPanel({
       </header>
 
       <div className="simulation-controls">
-        {!isRunning && !isPaused && !hasStarted && (
+        {!isComplete && (
           <button
             type="button"
             className="simulation-play-button"
-            onClick={onPlay}
+            onClick={onStepToNextPhase}
           >
-            <span className="simulation-play-button__icon">
-              ▶
-            </span>
-            Run demo
-          </button>
-        )}
-
-        {isRunning && !isPaused && (
-          <button
-            type="button"
-            className="simulation-control-button"
-            onClick={onPause}
-          >
-            ❚❚ Pause
-          </button>
-        )}
-
-        {isPaused && (
-          <button
-            type="button"
-            className="simulation-control-button"
-            onClick={onResume}
-          >
-            ▶ Resume
-          </button>
-        )}
-
-        {(hasStarted || isComplete) && (
-          <button
-            type="button"
-            className="simulation-control-button"
-            onClick={onRestart}
-          >
-            ↻ Restart
+            <span className="simulation-play-button__icon">▶</span>
+            Next stage
           </button>
         )}
 
@@ -119,40 +69,15 @@ export function FailureSimulationPanel({
             Reset
           </button>
         )}
-
-        <div className="simulation-speed-control">
-          {[1, 2, 4].map((option) => (
-            <button
-              type="button"
-              key={option}
-              className={
-                speed === option
-                  ? 'simulation-speed-button simulation-speed-button--active'
-                  : 'simulation-speed-button'
-              }
-              onClick={() =>
-                onSpeedChange(option as SimulationSpeed)
-              }
-            >
-              {option}×
-            </button>
-          ))}
-        </div>
       </div>
 
       <div className="simulation-progress">
         <div className="simulation-progress__labels">
           <span>{formatTime(status.elapsedSeconds)}</span>
-          <span>
-            {formatTime(status.durationSeconds)}
-          </span>
+          <span>{formatTime(status.durationSeconds)}</span>
         </div>
         <div className="simulation-progress__track">
-          <span
-            style={{
-              width: `${status.progressPct}%`,
-            }}
-          />
+          <span style={{ width: `${status.progressPct}%` }} />
         </div>
       </div>
 
@@ -168,9 +93,7 @@ export function FailureSimulationPanel({
         <div className="simulation-kpi-row">
           <article>
             <span>Model confidence</span>
-            <strong>
-              {status.detectionConfidencePct}%
-            </strong>
+            <strong>{status.detectionConfidencePct}%</strong>
           </article>
 
           <article>
@@ -183,9 +106,7 @@ export function FailureSimulationPanel({
 
           <article>
             <span>Target</span>
-            <strong>
-              {status.targetRoomId ?? 'Campus'}
-            </strong>
+            <strong>{status.targetRoomId ?? 'Campus'}</strong>
           </article>
         </div>
       )}
@@ -236,9 +157,7 @@ export function FailureSimulationPanel({
                   className={`simulation-log-entry simulation-log-entry--${entry.type}`}
                   key={`${entry.second}-${entry.title}`}
                 >
-                  <time>
-                    +{entry.second.toString().padStart(2, '0')}s
-                  </time>
+                  <time>+{entry.second.toString().padStart(2, '0')}s</time>
                   <div>
                     <strong>{entry.title}</strong>
                     <p>{entry.detail}</p>

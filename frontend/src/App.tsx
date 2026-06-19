@@ -88,16 +88,6 @@ function App() {
     }
   }
 
-  const handlePlay = () => {
-    setSelectedDeviceId(null)
-    simulation.play()
-  }
-
-  const handleRestart = () => {
-    setSelectedDeviceId(null)
-    simulation.restart()
-  }
-
   const handleReset = () => {
     setSelectedDeviceId(null)
     simulation.reset()
@@ -159,14 +149,7 @@ function App() {
 
         <FailureSimulationPanel
           status={simulation.status}
-          isRunning={simulation.isRunning}
-          isPaused={simulation.isPaused}
-          speed={simulation.speed}
-          onSpeedChange={simulation.setSpeed}
-          onPlay={handlePlay}
-          onPause={simulation.pause}
-          onResume={simulation.resume}
-          onRestart={handleRestart}
+          onStepToNextPhase={simulation.stepToNextPhase}
           onReset={handleReset}
         />
 
