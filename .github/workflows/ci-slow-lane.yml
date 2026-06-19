@@ -1,0 +1,261 @@
+name: ci-slow-lane
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "backend/**"
+      - ".github/workflows/ci-slow-lane.yml"
+      - ".github/scripts/**"
+  pull_request:
+    branches: [main]
+    paths:
+      - "backend/**"
+      - ".github/workflows/ci-slow-lane.yml"
+      - ".github/scripts/**"
+  workflow_dispatch:
+  schedule:
+    - cron: "17 3 * * *"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-slow-lane-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PYTHON_VERSION: "3.13"
+  CRAP_MAX_SCORE: "6"
+  DRY_MIN_FUNCTION_LINES: "8"
+  GHERKIN_MUTATION_RUNNER: ".github/scripts/run_acceptance_mutation_worker.sh"
+  PYTEST_DISABLE_PLUGIN_AUTOLOAD: "1"
+
+jobs:
+  slow-lane:
+    name: Backend quality slow lane
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v8.1.0
+        with:
+          enable-cache: true
+          cache-dependency-glob: |
+            backend/pyproject.toml
+            backend/uv.lock
+
+      - name: Sync backend uv environment
+        shell: bash
+        run: uv sync --project backend --frozen --dev
+
+      - name: Discover APS/Gherkin feature files
+        id: features
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p build/slow-lane
+          git ls-files 'backend/**/*.feature' \
+            | grep -Ev '(^|/)(\.agents|\.codex|\.gsd|\.skills|skills)/' \
+            > build/slow-lane/feature-files.txt || true
+          if [ -s build/slow-lane/feature-files.txt ]; then
+            echo "has_features=true" >> "$GITHUB_OUTPUT"
+            echo "Feature files:"
+            cat build/slow-lane/feature-files.txt
+          else
+            echo "has_features=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::No backend .feature files found; APS parser and Gherkin mutation stages will skip."
+          fi
+
+      - name: Discover production Python files
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p build/slow-lane
+          git ls-files 'backend/*.py' 'backend/**/*.py' \
+            | grep -Ev '(^|/)tests?/|(^|/)test_[^/]+\.py$|(^|/)[^/]+_test\.py$' \
+            > build/slow-lane/python-files.txt || true
+          if [ ! -s build/slow-lane/python-files.txt ]; then
+            echo "::error::No backend production Python files found for quality gates."
+            exit 1
+          fi
+          echo "Backend production Python files:"
+          cat build/slow-lane/python-files.txt
+
+      - name: Specifier gate - APS/Gherkin parse and IR DRY
+        id: specifier
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "${{ steps.features.outputs.has_features }}" != "true" ]; then
+            echo "::notice::Skipping APS parser gate because no backend .feature files are tracked."
+            exit 0
+          fi
+
+          .github/scripts/precommit_aps_gate.sh
+
+      - name: Coder gate - backend tests with coverage
+        id: normal_tests
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -euo pipefail
+          mapfile -t test_files < <(git ls-files \
+            'backend/test_*.py' \
+            'backend/*_test.py' \
+            'backend/**/test_*.py' \
+            'backend/**/*_test.py' \
+            | sort -u)
+          if [ "${#test_files[@]}" -eq 0 ]; then
+            echo "::notice::No backend tests found; skipping coverage gate."
+            exit 0
+          fi
+
+          mkdir -p build/slow-lane
+          uv run --project backend coverage erase
+          uv run --project backend coverage run -m pytest "${test_files[@]}" -q
+          uv run --project backend coverage combine
+          uv run --project backend coverage json -o build/slow-lane/coverage.json
+
+      - name: Cleaner gate - CRAP risk hardening check
+        id: cleaner_crap
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ ! -f build/slow-lane/coverage.json ]; then
+            echo "::notice::Skipping CRAP gate because no coverage JSON was produced."
+            exit 0
+          fi
+
+          mapfile -t python_files < build/slow-lane/python-files.txt
+          uv run --project backend python .github/scripts/crap_check.py \
+            --coverage-json build/slow-lane/coverage.json \
+            --max-score "$CRAP_MAX_SCORE" \
+            "${python_files[@]}"
+
+      - name: Cleaner gate - DRY structural hardening check
+        id: cleaner_dry
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -euo pipefail
+          mapfile -t python_files < build/slow-lane/python-files.txt
+          uv run --project backend python .github/scripts/dry_check.py \
+            --min-lines "$DRY_MIN_FUNCTION_LINES" \
+            --max-groups 0 \
+            "${python_files[@]}"
+
+      - name: Hardener gate - language mutation
+        id: language_mutation
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! uv run --project backend python -c 'import mutmut' >/dev/null 2>&1; then
+            echo "::notice::Skipping language mutation because mutmut is not installed."
+            exit 0
+          fi
+          mapfile -t test_files < <(git ls-files \
+            'backend/test_*.py' \
+            'backend/*_test.py' \
+            'backend/**/test_*.py' \
+            'backend/**/*_test.py' \
+            | sort -u)
+          if [ "${#test_files[@]}" -eq 0 ]; then
+            echo "::notice::Skipping language mutation because no backend tests exist."
+            exit 0
+          fi
+
+          uv run --project backend python .github/scripts/precommit_language_mutation_gate.py
+
+      - name: Hardener gate - soft Gherkin mutation
+        id: gherkin_mutation
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "${{ steps.features.outputs.has_features }}" != "true" ]; then
+            echo "::notice::Skipping Gherkin mutation because no backend .feature files are tracked."
+            exit 0
+          fi
+
+          .github/scripts/precommit_gherkin_mutation_gate.sh
+
+      - name: QA gate - final lint and backend verification
+        id: qa
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -euo pipefail
+          uv run --project backend ruff check --config backend/pyproject.toml backend
+          uv run --project backend ruff format --config backend/pyproject.toml --check backend
+          uv run --project backend mypy --config-file backend/pyproject.toml backend
+          uv run --project backend bandit -q -r backend -x backend/.venv,backend/tests
+          uv audit --project backend --preview-features audit
+
+          mapfile -t python_files < <(git ls-files 'backend/*.py' 'backend/**/*.py' | sort -u)
+          uv run --project backend python -m py_compile "${python_files[@]}"
+
+          mapfile -t test_files < <(git ls-files \
+            'backend/test_*.py' \
+            'backend/*_test.py' \
+            'backend/**/test_*.py' \
+            'backend/**/*_test.py' \
+            | sort -u)
+          if [ "${#test_files[@]}" -gt 0 ]; then
+            uv run --project backend pytest "${test_files[@]}" -q
+          else
+            echo "::notice::No backend tests found; QA test step skipped."
+          fi
+
+      - name: Upload slow-lane reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: slow-lane-reports
+          path: |
+            build/slow-lane/
+            build/pre-commit/acceptance/
+            build/acceptance-mutation/
+          if-no-files-found: ignore
+
+      - name: Fail if any slow-lane gate failed
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          failed=0
+          check_gate() {
+            local name="$1"
+            local outcome="$2"
+            printf '%s: %s\n' "$name" "$outcome"
+            if [ "$outcome" != "success" ] && [ "$outcome" != "skipped" ]; then
+              failed=1
+            fi
+          }
+
+          check_gate "Specifier APS/Gherkin parse" "${{ steps.specifier.outcome }}"
+          check_gate "Coder backend tests" "${{ steps.normal_tests.outcome }}"
+          check_gate "Cleaner CRAP" "${{ steps.cleaner_crap.outcome }}"
+          check_gate "Cleaner DRY" "${{ steps.cleaner_dry.outcome }}"
+          check_gate "Hardener language mutation" "${{ steps.language_mutation.outcome }}"
+          check_gate "Hardener soft Gherkin mutation" "${{ steps.gherkin_mutation.outcome }}"
+          check_gate "QA final verification" "${{ steps.qa.outcome }}"
+
+          if [ "$failed" -ne 0 ]; then
+            echo "::error::One or more slow-lane gates failed. Review the gate output above."
+            exit 1
+          fi

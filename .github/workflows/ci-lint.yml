@@ -1,0 +1,86 @@
+name: ci-lint
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "backend/**/*.py"
+      - "backend/requirements*.txt"
+      - "backend/pyproject.toml"
+      - "backend/uv.lock"
+      - ".github/workflows/ci-lint.yml"
+  pull_request:
+    paths:
+      - "backend/**/*.py"
+      - "backend/requirements*.txt"
+      - "backend/pyproject.toml"
+      - "backend/uv.lock"
+      - ".github/workflows/ci-lint.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-lint-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend-quality:
+    name: Backend lint, format, type, and security
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v8.1.0
+        with:
+          enable-cache: true
+          cache-dependency-glob: |
+            backend/pyproject.toml
+            backend/uv.lock
+
+      - name: Validate Python file placement
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          offenders = sorted(
+              str(path)
+              for path in Path(".").rglob("*.py")
+              if ".git" not in path.parts
+              and path.parts[:1] != ("backend",)
+              and path.parts[:2] != (".github", "scripts")
+          )
+
+          if offenders:
+              print("Application Python files must live under backend/.")
+              print("Only CI helper Python scripts may live under .github/scripts/:")
+              print("\n".join(offenders))
+              raise SystemExit(1)
+          PY
+
+      - name: Sync backend uv environment
+        run: uv sync --project backend --frozen --dev
+
+      - name: Run Ruff lint
+        run: uv run --project backend ruff check --config backend/pyproject.toml backend
+
+      - name: Run Ruff format check
+        run: uv run --project backend ruff format --config backend/pyproject.toml --check backend
+
+      - name: Run Mypy type check
+        run: uv run --project backend mypy --config-file backend/pyproject.toml backend
+
+      - name: Run Bandit security scan
+        run: uv run --project backend bandit -q -r backend -x backend/.venv,backend/tests
+
+      - name: Run uv dependency audit
+        run: uv audit --project backend --preview-features audit

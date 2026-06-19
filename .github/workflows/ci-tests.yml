@@ -1,0 +1,69 @@
+name: ci-tests
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "backend/**"
+      - ".github/workflows/ci-tests.yml"
+      - ".github/scripts/**"
+  pull_request:
+    paths:
+      - "backend/**"
+      - ".github/workflows/ci-tests.yml"
+      - ".github/scripts/**"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend-tests:
+    name: Tests
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v8.1.0
+        with:
+          enable-cache: true
+          cache-dependency-glob: |
+            backend/pyproject.toml
+            backend/uv.lock
+
+      - name: Sync backend uv environment
+        run: uv sync --project backend --frozen --dev
+
+      - name: Compile backend Python
+        run: |
+          mapfile -t python_files < <(git ls-files 'backend/*.py' 'backend/**/*.py' | sort -u)
+          uv run --project backend python -m py_compile "${python_files[@]}"
+
+      - name: Run backend tests when present
+        run: |
+          set -euo pipefail
+
+          mapfile -t test_files < <(git ls-files \
+            'backend/test_*.py' \
+            'backend/*_test.py' \
+            'backend/**/test_*.py' \
+            'backend/**/*_test.py' \
+            | sort -u)
+          if [ "${#test_files[@]}" -eq 0 ]; then
+            echo "No backend tests found; skipping test discovery."
+            exit 0
+          fi
+
+          uv run --project backend pytest "${test_files[@]}" -q

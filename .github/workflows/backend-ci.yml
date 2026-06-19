@@ -1,0 +1,95 @@
+name: Backend CI
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "backend/**"
+      - ".github/workflows/backend-ci.yml"
+      - ".github/instructions/**"
+      - "AGENTS.md"
+      - "GEMINI.md"
+      - "CLAUDE.md"
+  pull_request:
+    paths:
+      - "backend/**"
+      - ".github/workflows/backend-ci.yml"
+      - ".github/instructions/**"
+      - "AGENTS.md"
+      - "GEMINI.md"
+      - "CLAUDE.md"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: backend-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend-python:
+    name: Backend Python
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v8.1.0
+        with:
+          enable-cache: true
+          cache-dependency-glob: |
+            backend/pyproject.toml
+            backend/uv.lock
+
+      - name: Validate Python file placement
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          offenders = sorted(
+              str(path)
+              for path in Path(".").rglob("*.py")
+              if ".git" not in path.parts
+              and path.parts[:1] != ("backend",)
+              and path.parts[:2] != (".github", "scripts")
+          )
+
+          if offenders:
+              print("Application Python files must live under backend/.")
+              print("Only CI helper Python scripts may live under .github/scripts/:")
+              print("\n".join(offenders))
+              raise SystemExit(1)
+          PY
+
+      - name: Sync backend uv environment
+        run: uv sync --project backend --frozen --dev
+
+      - name: Compile backend Python
+        run: |
+          mapfile -t python_files < <(git ls-files 'backend/*.py' 'backend/**/*.py' | sort -u)
+          uv run --project backend python -m py_compile "${python_files[@]}"
+
+      - name: Run backend tests when present
+        run: |
+          mapfile -t test_files < <(git ls-files \
+            'backend/test_*.py' \
+            'backend/*_test.py' \
+            'backend/**/test_*.py' \
+            'backend/**/*_test.py' \
+            | sort -u)
+
+          if [ "${#test_files[@]}" -eq 0 ]; then
+            echo "No backend tests found; skipping unit test discovery."
+            exit 0
+          fi
+
+          uv run --project backend pytest "${test_files[@]}" -q
