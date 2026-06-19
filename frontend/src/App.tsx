@@ -10,11 +10,12 @@ import { FailureSimulationPanel } from './components/ui/FailureSimulationPanel'
 import { TopBar } from './components/ui/TopBar'
 import {
   plannedActions,
-  roomEvents,
+  roomEvents as mockRoomEvents,
   roomLoadHeatmap,
-  weatherForecast,
+  weatherForecast as mockWeatherForecast,
 } from './data/mockCampus'
 import { useFailureSimulation } from './hooks/useFailureSimulation'
+import { useLiveData } from './hooks/useLiveData'
 import type { FloorFilter } from './types/campus'
 import {
   STATUS_COLORS,
@@ -33,17 +34,26 @@ function App() {
   const [activeFloor, setActiveFloor] =
     useState<FloorFilter>('all')
 
+  const [isLiveMode, setIsLiveMode] = useState(false)
+  const liveData = useLiveData()
+
   const [selectedDeviceId, setSelectedDeviceId] =
     useState<string | null>(null)
 
   const simulation = useFailureSimulation()
 
+  const currentDevices = isLiveMode && liveData.devices.length > 0
+    ? liveData.devices
+    : simulation.devices
+
+  const currentRooms = simulation.rooms
+
   const selectedDevice = useMemo(
     () =>
-      simulation.devices.find(
+      currentDevices.find(
         (device) => device.id === selectedDeviceId,
       ) ?? null,
-    [simulation.devices, selectedDeviceId],
+    [currentDevices, selectedDeviceId],
   )
 
   useEffect(() => {
@@ -99,11 +109,27 @@ function App() {
         activeFloor={activeFloor}
         onFloorChange={handleFloorChange}
       />
+      
+      <div style={{ padding: '8px 16px', display: 'flex', gap: '16px', alignItems: 'center', background: 'rgba(0,0,0,0.2)', borderBottom: '1px solid rgba(255,255,255,0.1)' }}>
+        <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', fontSize: '14px' }}>
+          <input 
+            type="checkbox" 
+            checked={isLiveMode} 
+            onChange={(e) => setIsLiveMode(e.target.checked)} 
+          />
+          Live Data Mode {liveData.isLoading && isLiveMode ? '(Loading...)' : ''}
+        </label>
+        {isLiveMode && liveData.error && (
+          <span style={{ color: '#ff6b6b', fontSize: '14px' }}>
+            Error connecting to API (backend might not be running)
+          </span>
+        )}
+      </div>
 
       <main className="map-stage">
         <CampusCanvas
-          rooms={simulation.rooms}
-          devices={simulation.devices}
+          rooms={currentRooms}
+          devices={currentDevices}
           activeFloor={activeFloor}
           selectedDeviceId={selectedDeviceId}
           onSelectDevice={setSelectedDeviceId}
@@ -152,14 +178,14 @@ function App() {
         </div>
 
         <CampusSidebar
-          rooms={simulation.rooms}
-          devices={simulation.devices}
+          rooms={currentRooms}
+          devices={currentDevices}
           selectedDeviceId={selectedDeviceId}
           buildingTelemetry={
             simulation.buildingTelemetry
           }
-          weatherForecast={weatherForecast}
-          roomEvents={roomEvents}
+          weatherForecast={isLiveMode && liveData.weatherForecast.length > 0 ? liveData.weatherForecast : mockWeatherForecast}
+          roomEvents={isLiveMode && liveData.roomEvents.length > 0 ? liveData.roomEvents : mockRoomEvents}
           controlDecisions={
             simulation.controlDecisions
           }
