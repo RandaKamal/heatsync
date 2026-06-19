@@ -16,7 +16,7 @@ import pandas as pd
 from datetime import datetime, timedelta, date, timezone
 from zoneinfo import ZoneInfo
 
-from data.loader import intervals_all
+from loader import intervals_all
 from api.weather import fetch_forecast, DEFAULT_LAT, DEFAULT_LON
 from comfort.model import (
     comfort_setpoint,

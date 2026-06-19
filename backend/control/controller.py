@@ -11,7 +11,7 @@ Supports:
 
 from datetime import datetime, timezone
 from typing import Optional
-from data.loader import devices as load_devices
+from loader import devices as load_devices
 from comfort.model import MOLD_ABSOLUTE_MIN_CELSIUS, MAX_EVENT_POWER_FRACTION
 
 _DEVICE_IDS = [

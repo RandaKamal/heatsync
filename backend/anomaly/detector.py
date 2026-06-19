@@ -13,7 +13,7 @@ Severity levels: "critical", "warning", "info"
 
 import pandas as pd
 import numpy as np
-from data.loader import snapshots, snapshots_all, devices
+from loader import snapshots, snapshots_all, devices
 
 # Register bit-to-description maps (from dataset README)
 _REG_NAMES = {

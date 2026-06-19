@@ -1,6 +1,6 @@
 from flask import Blueprint, jsonify, request
 from api.weather import fetch_forecast, fetch_current, DEFAULT_LAT, DEFAULT_LON
-import data.loader as loader
+import loader
 import impact.calculator as impact
 import prediction.predictor as predictor
 import anomaly.detector as detector
