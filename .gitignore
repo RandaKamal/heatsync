@@ -220,4 +220,4 @@ __marimo__/
 
 # data files
 backend/data/*
-!data/.gitkeep
+!backend/data/.gitkeep
