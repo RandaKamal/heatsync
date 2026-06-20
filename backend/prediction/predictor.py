@@ -96,38 +96,38 @@ def _lead_minutes(
 
 
 def _upcoming_events(days: int = 7) -> list[dict]:
-    """
-    Weekday campus lecture schedule for the next `days` days.
-    Bayern public holidays are excluded (no occupancy → no need to preheat).
-    Occupancy is attached for setpoint adjustment.
-    """
     now = datetime.now(BERLIN)
     events = []
     for offset in range(days + 1):
-        day_dt = now + timedelta(days=offset)
-        day = day_dt.replace(hour=0, minute=0, second=0, microsecond=0)
+        day = (now + timedelta(days=offset)).replace(hour=0, minute=0, second=0, microsecond=0)
+        events.extend(_events_for_day(day))
+    return events
 
-        if day.weekday() >= WEEKEND_START_DAY:  # Saturday or Sunday
-            continue
-        if is_holiday_bavaria(day.date()):
-            continue  # Bayern Feiertag — no lectures
 
-        for name, start_h, start_m, end_h, end_m in [
-            ("Morning lecture", 7, 0, 12, 0),
-            ("Afternoon lecture", 13, 0, 18, 0),
-        ]:
-            s = day.replace(hour=start_h, minute=start_m).astimezone(UTC)
-            e = day.replace(hour=end_h, minute=end_m).astimezone(UTC)
-            if e > datetime.now(UTC):
-                events.append(
-                    {
-                        "name": name,
-                        "starts_at": s,
-                        "ends_at": e,
-                        "occupancy": DEFAULT_OCCUPANCY.get(name, 50),
-                        "day_date": day.date(),
-                    }
-                )
+def _events_for_day(day: datetime) -> list[dict]:
+    if day.weekday() >= WEEKEND_START_DAY or is_holiday_bavaria(day.date()):
+        return []
+    return _daily_lectures(day)
+
+
+def _daily_lectures(day: datetime) -> list[dict]:
+    events = []
+    for name, start_h, start_m, end_h, end_m in [
+        ("Morning lecture", 7, 0, 12, 0),
+        ("Afternoon lecture", 13, 0, 18, 0),
+    ]:
+        s = day.replace(hour=start_h, minute=start_m).astimezone(UTC)
+        e = day.replace(hour=end_h, minute=end_m).astimezone(UTC)
+        if e > datetime.now(UTC):
+            events.append(
+                {
+                    "name": name,
+                    "starts_at": s,
+                    "ends_at": e,
+                    "occupancy": DEFAULT_OCCUPANCY.get(name, 50),
+                    "day_date": day.date(),
+                }
+            )
     return events
 
 
@@ -135,87 +135,84 @@ def _upcoming_events(days: int = 7) -> list[dict]:
 
 
 def schedule(lat: float = DEFAULT_LAT, lon: float = DEFAULT_LON) -> list[dict]:
-    """
-    Recommended heat pump start times for upcoming campus events.
-    Each event includes:
-      - Seasonal comfort setpoint (adjusted for occupancy / clothing)
-      - Predicted mode (HEAT / COOL / AUTO)
-      - Lead time accounting for noise-limited ramp rate
-      - Holiday skip reasoning where applicable
-    """
     rates = _rate_model()
     forecast = fetch_forecast(lat, lon, days=7)
     hourly = {h["time"]: h for h in forecast["hourly"]}
     now = datetime.now(UTC)
     results = []
-
     for ev in _upcoming_events(days=7):
-        event_start = ev["starts_at"]
-        if event_start <= now:
-            continue
-
-        month = event_start.astimezone(BERLIN).month
-        occupancy = ev["occupancy"]
-        target_setpoint = comfort_setpoint(month, occupancy)
-
-        hour_key = event_start.astimezone(BERLIN).strftime("%Y-%m-%dT%H:00")
-        hour_data = hourly.get(hour_key, {})
-        outdoor_temp = hour_data.get("temperature_2m", 15.0)
-
-        if outdoor_temp < (target_setpoint - 5):
-            mode = "HEAT"
-        elif outdoor_temp > (target_setpoint + 3):
-            mode = "COOL"
-        else:
-            mode = "AUTO"
-
-        lead = _lead_minutes(mode, outdoor_temp, target_setpoint, rates)
-        recommended_start = event_start - timedelta(minutes=lead)
-
-        results.append(
-            {
-                "event_name": ev["name"],
-                "event_start": event_start.isoformat(),
-                "event_end": ev["ends_at"].isoformat(),
-                "occupancy": occupancy,
-                "outdoor_temp_celsius": outdoor_temp,
-                "season_comfort_setpoint_celsius": target_setpoint,
-                "mold_safe_min_celsius": MOLD_SAFE_MIN_CELSIUS,
-                "noise_limited_power_fraction": MAX_EVENT_POWER_FRACTION,
-                "predicted_mode": mode,
-                "recommended_start": recommended_start.isoformat(),
-                "lead_time_minutes": lead,
-            }
-        )
-
+        if ev["starts_at"] > now:
+            results.append(_schedule_event(ev, rates, hourly))
     return results
 
 
+def _schedule_event(ev: dict, rates: dict, hourly: dict) -> dict:
+    event_start = ev["starts_at"]
+    month = event_start.astimezone(BERLIN).month
+    occupancy = ev["occupancy"]
+    target_setpoint = comfort_setpoint(month, occupancy)
+
+    hour_key = event_start.astimezone(BERLIN).strftime("%Y-%m-%dT%H:00")
+    outdoor_temp = hourly.get(hour_key, {}).get("temperature_2m", 15.0)
+    mode = _predict_mode(outdoor_temp, target_setpoint)
+
+    lead = _lead_minutes(mode, outdoor_temp, target_setpoint, rates)
+    recommended_start = event_start - timedelta(minutes=lead)
+
+    return {
+        "event_name": ev["name"],
+        "event_start": event_start.isoformat(),
+        "event_end": ev["ends_at"].isoformat(),
+        "occupancy": occupancy,
+        "outdoor_temp_celsius": outdoor_temp,
+        "season_comfort_setpoint_celsius": target_setpoint,
+        "mold_safe_min_celsius": MOLD_SAFE_MIN_CELSIUS,
+        "noise_limited_power_fraction": MAX_EVENT_POWER_FRACTION,
+        "predicted_mode": mode,
+        "recommended_start": recommended_start.isoformat(),
+        "lead_time_minutes": lead,
+    }
+
+
+def _predict_mode(outdoor_temp: float, target_setpoint: float) -> str:
+    if outdoor_temp < (target_setpoint - 5):
+        return "HEAT"
+    if outdoor_temp > (target_setpoint + 3):
+        return "COOL"
+    return "AUTO"
+
+
 def preheat_now(lat: float = DEFAULT_LAT, lon: float = DEFAULT_LON) -> dict:
-    """Should a preheat/precool action start right now for the soonest event?"""
     upcoming = schedule(lat, lon)
     if not upcoming:
         return {"action": "NONE", "reason": "No upcoming events in the next 7 days."}
+    return _evaluate_preheat(upcoming[0], datetime.now(UTC))
 
-    soonest = upcoming[0]
+
+def _evaluate_preheat(soonest: dict, now: datetime) -> dict:
     start_dt = datetime.fromisoformat(soonest["recommended_start"])
-    now = datetime.now(UTC)
-
     if now >= start_dt:
-        return {
-            "action": soonest["predicted_mode"],
-            "event_name": soonest["event_name"],
-            "event_start": soonest["event_start"],
-            "recommended_start": soonest["recommended_start"],
-            "target_setpoint_celsius": soonest["season_comfort_setpoint_celsius"],
-            "lead_time_minutes": soonest["lead_time_minutes"],
-            "reason": (
-                f"Start {soonest['predicted_mode']} now — preheat window open. "
-                f"Target {soonest['season_comfort_setpoint_celsius']}°C for "
-                f"{soonest['occupancy']} expected occupants."
-            ),
-        }
+        return _preheat_action_now(soonest)
+    return _preheat_action_wait(soonest, now, start_dt)
 
+
+def _preheat_action_now(soonest: dict) -> dict:
+    return {
+        "action": soonest["predicted_mode"],
+        "event_name": soonest["event_name"],
+        "event_start": soonest["event_start"],
+        "recommended_start": soonest["recommended_start"],
+        "target_setpoint_celsius": soonest["season_comfort_setpoint_celsius"],
+        "lead_time_minutes": soonest["lead_time_minutes"],
+        "reason": (
+            f"Start {soonest['predicted_mode']} now — preheat window open. "
+            f"Target {soonest['season_comfort_setpoint_celsius']}°C for "
+            f"{soonest['occupancy']} expected occupants."
+        ),
+    }
+
+
+def _preheat_action_wait(soonest: dict, now: datetime, start_dt: datetime) -> dict:
     minutes_until = int((start_dt - now).total_seconds() / 60)
     return {
         "action": "WAIT",

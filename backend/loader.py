@@ -66,56 +66,67 @@ def snapshots(window: str = "heating") -> pd.DataFrame:
     rows = []
     for device_index, device in enumerate(_DEVICE_ROWS):
         for sample_index in range(_SAMPLE_COUNT):
-            timestamp = start + timedelta(minutes=_INTERVAL_MINUTES * sample_index)
-            temperature = 18.5 + sample_index * 0.2
-            if window == "cooling":
-                temperature = 24.5 - sample_index * 0.15
             rows.append(
-                {
-                    "id": f"{window}-{device_index}-{sample_index}",
-                    "device_id": device["device_id"],
-                    "space_id": _SPACE_ID,
-                    "last_seen_at": timestamp,
-                    "status_is_enabled": 1,
-                    "status_operation_mode": operation_mode,
-                    "status_target_temperature_in_celsius": 21.0,
-                    "status_temperature_in_celsius": round(temperature, 2),
-                    "status_humidity_in_percent": 45.0 + device_index,
-                    "status_carbon_dioxide_in_ppm": 440 + sample_index,
-                    "status_voc_in_micrograms_per_cubic_meter": 120 + device_index,
-                    "status_temperature_supply_in_celsius": 22.0 + sample_index * 0.1,
-                    "status_temperature_return_in_celsius": 18.0 + sample_index * 0.05,
-                    "status_temperature_outside_in_celsius": (5.0 if window == "heating" else 28.0),
-                    "status_air_flow_supply_in_percent": 40,
-                    "status_air_flow_return_in_percent": 40,
-                    "status_is_heating_required": int(
-                        window == "heating" and sample_index >= _CONDITIONING_START_SAMPLE
-                    ),
-                    "status_is_cooling_required": int(
-                        window == "cooling" and sample_index >= _CONDITIONING_START_SAMPLE
-                    ),
-                    "status_heat_threshold_in_celsius": 19.0,
-                    "status_cool_threshold_in_celsius": 24.0,
-                    "status_is_compressor_active": int(sample_index >= _CONDITIONING_START_SAMPLE),
-                    "status_is_defrost_active": 0,
-                    "status_low_pressure_in_bar": 6.8 + device_index * 0.1,
-                    "status_high_pressure_in_bar": 10.0 + device_index * 0.2,
-                    "status_daily_shutdown_is_active": 0,
-                    "status_daily_shutdown_temperature_in_celsius": 18.0,
-                    "status_daily_shutdown_air_flow_supply_in_percent": 40,
-                    "status_daily_shutdown_air_flow_return_in_percent": 40,
-                    "status_is_status_active": 1,
-                    "status_is_alarm_active": 0,
-                    "status_error_registers": "0,0,0,0",
-                    "status_is_network_connected": 1,
-                    "status_has_network_error": 0,
-                    "status_network_error_count": 0,
-                    "status_system_uptime_in_seconds": 1_000_000 + sample_index,
-                    "firmware_version": "synthetic",
-                    "payload_version": 1,
-                }
+                _create_snapshot(window, start, operation_mode, device_index, device, sample_index)
             )
     return _with_window(rows, window)
+
+
+def _create_snapshot(
+    window: str,
+    start: datetime,
+    operation_mode: str,
+    device_index: int,
+    device: dict,
+    sample_index: int,
+) -> dict:
+    timestamp = start + timedelta(minutes=_INTERVAL_MINUTES * sample_index)
+    temperature = 18.5 + sample_index * 0.2
+    if window == "cooling":
+        temperature = 24.5 - sample_index * 0.15
+    return {
+        "id": f"{window}-{device_index}-{sample_index}",
+        "device_id": device["device_id"],
+        "space_id": _SPACE_ID,
+        "last_seen_at": timestamp,
+        "status_is_enabled": 1,
+        "status_operation_mode": operation_mode,
+        "status_target_temperature_in_celsius": 21.0,
+        "status_temperature_in_celsius": round(temperature, 2),
+        "status_humidity_in_percent": 45.0 + device_index,
+        "status_carbon_dioxide_in_ppm": 440 + sample_index,
+        "status_voc_in_micrograms_per_cubic_meter": 120 + device_index,
+        "status_temperature_supply_in_celsius": 22.0 + sample_index * 0.1,
+        "status_temperature_return_in_celsius": 18.0 + sample_index * 0.05,
+        "status_temperature_outside_in_celsius": (5.0 if window == "heating" else 28.0),
+        "status_air_flow_supply_in_percent": 40,
+        "status_air_flow_return_in_percent": 40,
+        "status_is_heating_required": int(
+            window == "heating" and sample_index >= _CONDITIONING_START_SAMPLE
+        ),
+        "status_is_cooling_required": int(
+            window == "cooling" and sample_index >= _CONDITIONING_START_SAMPLE
+        ),
+        "status_heat_threshold_in_celsius": 19.0,
+        "status_cool_threshold_in_celsius": 24.0,
+        "status_is_compressor_active": int(sample_index >= _CONDITIONING_START_SAMPLE),
+        "status_is_defrost_active": 0,
+        "status_low_pressure_in_bar": 6.8 + device_index * 0.1,
+        "status_high_pressure_in_bar": 10.0 + device_index * 0.2,
+        "status_daily_shutdown_is_active": 0,
+        "status_daily_shutdown_temperature_in_celsius": 18.0,
+        "status_daily_shutdown_air_flow_supply_in_percent": 40,
+        "status_daily_shutdown_air_flow_return_in_percent": 40,
+        "status_is_status_active": 1,
+        "status_is_alarm_active": 0,
+        "status_error_registers": "0,0,0,0",
+        "status_is_network_connected": 1,
+        "status_has_network_error": 0,
+        "status_network_error_count": 0,
+        "status_system_uptime_in_seconds": 1_000_000 + sample_index,
+        "firmware_version": "synthetic",
+        "payload_version": 1,
+    }
 
 
 def snapshots_all() -> pd.DataFrame:
