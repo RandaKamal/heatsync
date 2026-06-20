@@ -5,7 +5,7 @@ Supports:
   - Global mode: AUTO | HEAT | COOL | OFF
   - Per-device overrides (enable/disable, individual setpoint)
   - Prediction toggle
-  - Mold prevention floor (hard constraint — user cannot set below this)
+  - Mold prevention floor (hard constraint - user cannot set below this)
   - Noise limit: max power fraction during occupied events
 """
 

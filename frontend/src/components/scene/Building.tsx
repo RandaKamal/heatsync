@@ -1,202 +1,108 @@
 import { Line } from '@react-three/drei'
-import type {
-  ClimateDevice,
-  FloorFilter,
-  Room,
-} from '../../types/campus'
+import type { ClimateDevice, FloorFilter, Room } from '../../types/campus'
 import { STATUS_COLORS } from '../../utils/status'
 import { ClimateDevice as ClimateDeviceMesh } from './ClimateDevice'
 import { RoomMesh } from './RoomMesh'
+
+const W = 24
+const D = 16
+const H = 3.5
+const T = 0.18
 
 interface BuildingProps {
   rooms: Room[]
   devices: ClimateDevice[]
   activeFloor: FloorFilter
-  selectedDeviceId: string | null
-  onSelectDevice: (deviceId: string) => void
-  onCloseDevice: () => void
+  onSelectDevice: (id: string) => void
+  onSelectRoom: (id: string) => void
 }
 
-interface FloorSlabProps {
-  y: number
-  highlighted: boolean
-}
-
-function FloorSlab({
-  y,
-  highlighted,
-}: FloorSlabProps) {
+function FloorSlab() {
   return (
-    <mesh
-      position={[0, y, -0.1]}
-      receiveShadow
-      castShadow
-    >
-      <boxGeometry args={[12.2, 0.12, 7.4]} />
-      <meshStandardMaterial
-        color={highlighted ? '#22354a' : '#172536'}
-        roughness={0.78}
-        metalness={0.08}
-        transparent
-        opacity={highlighted ? 0.95 : 0.7}
-      />
+    <mesh position={[0, 0, 0]} receiveShadow castShadow>
+      <boxGeometry args={[W + T, T, D + T]} />
+      <meshStandardMaterial color="#172536" roughness={0.82} metalness={0.06} />
     </mesh>
   )
 }
 
-export function Building({
-  rooms,
-  devices,
-  activeFloor,
-  selectedDeviceId,
-  onSelectDevice,
-  onCloseDevice,
-}: BuildingProps) {
+function Roof() {
+  return (
+    <mesh position={[0, H + T / 2, 0]} receiveShadow>
+      <boxGeometry args={[W + T, T, D + T]} />
+      <meshStandardMaterial color="#1a2d40" roughness={0.78} metalness={0.1} />
+    </mesh>
+  )
+}
+
+function Walls() {
+  const mat = (
+    <meshStandardMaterial
+      color="#1e3a52"
+      transparent
+      opacity={0.22}
+      roughness={0.15}
+      metalness={0.4}
+      depthWrite={false}
+    />
+  )
+  const yMid = H / 2
+  return (
+    <group>
+      <mesh position={[0, yMid, -D / 2]}><boxGeometry args={[W, H, T]} />{mat}</mesh>
+      <mesh position={[-W / 2, yMid, 0]}><boxGeometry args={[T, H, D]} />{mat}</mesh>
+      <mesh position={[W / 2, yMid, 0]}><boxGeometry args={[T, H, D]} />{mat}</mesh>
+      <mesh position={[0, yMid, D / 2]}>
+        <boxGeometry args={[W, H, T]} />
+        <meshStandardMaterial color="#1e3a52" transparent opacity={0.10} roughness={0.15} metalness={0.4} depthWrite={false} />
+      </mesh>
+    </group>
+  )
+}
+
+export function Building({ rooms, devices, activeFloor, onSelectDevice, onSelectRoom }: BuildingProps) {
   const visibleRooms = rooms.filter(
-    (room) =>
-      activeFloor === 'all' ||
-      room.floor === activeFloor,
+    (r) => activeFloor === 'all' || r.floor === activeFloor,
   )
 
-  const visibleDevices = devices.filter((device) => {
-    if (device.floor === 'external') {
-      return true
-    }
+  const ceilingCentre: [number, number, number] = [0, H, 0]
 
-    return (
-      activeFloor === 'all' ||
-      device.floor === activeFloor
-    )
-  })
-
-  const selectedDevice = devices.find(
-    (device) => device.id === selectedDeviceId,
-  )
-
-  const ductLinks = visibleDevices
-    .filter(
-      (device) =>
-        device.technology === 'orion-mobile-rooftop',
-    )
-    .flatMap((device) =>
-      device.servedRoomIds
-        .map((roomId) => {
-          const room = rooms.find(
-            (candidate) => candidate.id === roomId,
-          )
-
-          if (!room) {
-            return null
-          }
-
-          if (
-            activeFloor !== 'all' &&
-            room.floor !== activeFloor
-          ) {
-            return null
-          }
-
-          return {
-            key: `${device.id}-${room.id}`,
-            selected: device.id === selectedDeviceId,
-            color: STATUS_COLORS[device.status],
-            points: [
-              [
-                device.position[0],
-                device.position[1] + 0.2,
-                device.position[2],
-              ],
-              [
-                room.position[0],
-                room.position[1] + 0.2,
-                room.position[2] + room.size[2] / 2,
-              ],
-            ] as [[number, number, number], [number, number, number]],
-          }
-        })
-        .filter((link): link is NonNullable<typeof link> => link !== null),
-    )
+  const ductLines = devices.map((device) => ({
+    key: device.id,
+    color: STATUS_COLORS[device.status],
+    points: [
+      [device.position[0], device.position[1] - 0.53, device.position[2]] as [number, number, number],
+      [device.position[0], H + T, device.position[2]] as [number, number, number],
+      ceilingCentre,
+    ] as [[number, number, number], [number, number, number], [number, number, number]],
+  }))
 
   return (
     <group>
-      <FloorSlab
-        y={0.08}
-        highlighted={
-          activeFloor === 'all' || activeFloor === 0
-        }
-      />
+      <FloorSlab />
+      <Walls />
+      <Roof />
 
-      {(activeFloor === 'all' || activeFloor === 1) && (
-        <FloorSlab
-          y={1.72}
-          highlighted={
-            activeFloor === 'all' || activeFloor === 1
-          }
-        />
-      )}
-
-      {[
-        [-5.85, 1.65, -3.55],
-        [5.85, 1.65, -3.55],
-        [-5.85, 1.65, 3.35],
-        [5.85, 1.65, 3.35],
-      ].map(([x, y, z]) => (
-        <mesh
-          key={`${x}-${z}`}
-          position={[x, y, z]}
-          castShadow
-        >
-          <boxGeometry args={[0.15, 3.2, 0.15]} />
-          <meshStandardMaterial
-            color="#40536a"
-            metalness={0.35}
-            roughness={0.55}
-          />
-        </mesh>
-      ))}
-
-      <mesh position={[0, 0.76, 2.32]} receiveShadow>
-        <boxGeometry args={[11.8, 1.28, 1]} />
-        <meshStandardMaterial
-          color="#18283a"
-          transparent
-          opacity={0.32}
-          roughness={0.75}
-          depthWrite={false}
-        />
-      </mesh>
-
-      {ductLinks.map((link) => (
+      {ductLines.map((duct) => (
         <Line
-          key={link.key}
-          points={link.points}
-          color={link.color}
-          lineWidth={link.selected ? 3 : 1}
+          key={duct.key}
+          points={duct.points}
+          color={duct.color}
+          lineWidth={1.5}
           transparent
-          opacity={selectedDevice ? (link.selected ? 0.9 : 0.08) : 0.22}
-          dashed={!link.selected}
-          dashSize={0.35}
-          gapSize={0.22}
+          opacity={0.35}
+          dashed
+          dashSize={0.5}
+          gapSize={0.3}
         />
       ))}
 
       {visibleRooms.map((room) => (
-        <RoomMesh
-          key={room.id}
-          room={room}
-          showLabel={selectedDeviceId === null}
-        />
+        <RoomMesh key={room.id} room={room} onSelect={onSelectRoom} />
       ))}
 
-      {visibleDevices.map((device) => (
-        <ClimateDeviceMesh
-          key={device.id}
-          device={device}
-          selected={selectedDeviceId === device.id}
-          labelsSuppressed={selectedDeviceId !== null}
-          onSelect={onSelectDevice}
-          onClose={onCloseDevice}
-        />
+      {devices.map((device) => (
+        <ClimateDeviceMesh key={device.id} device={device} onSelect={onSelectDevice} />
       ))}
     </group>
   )

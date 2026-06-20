@@ -1,6 +1,6 @@
 """
 Weather forecast service using Open-Meteo (free, no API key required).
-Location: Ottobrunn-Taufkirchen, Munich area — TUM Aerospace & Geodesy Campus.
+Location: Ottobrunn-Taufkirchen, Munich area - TUM Aerospace & Geodesy Campus.
 """
 
 from datetime import UTC, datetime

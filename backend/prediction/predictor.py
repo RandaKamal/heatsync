@@ -5,7 +5,7 @@ Approach:
 1. From historical intervals, derive heating/cooling rate (°C gap closed per hour).
 2. Combine with live weather forecast, seasonal comfort setpoint, occupancy, and
    noise power limit to calculate required lead time before each event.
-3. Skip Bayern public holidays — no occupancy, keep at unoccupied/mold-safe setpoint.
+3. Skip Bayern public holidays - no occupancy, keep at unoccupied/mold-safe setpoint.
 
 Space config (from dataset README):
   Unoccupied setpoint : 11 °C  (controlled up to mold-safe minimum by comfort model)
