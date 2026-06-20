@@ -1,7 +1,7 @@
 # Codebase Map
 
-Generated: 2026-06-20T16:09:40Z | Files: 161 | Described: 0/161
-<!-- gsd:codebase-meta {"generatedAt":"2026-06-20T16:09:40Z","fingerprint":"0758260f95003455206a25499b1e55df1a2b951c","fileCount":161,"truncated":false} -->
+Generated: 2026-06-20T16:52:41Z | Files: 160 | Described: 0/160
+<!-- gsd:codebase-meta {"generatedAt":"2026-06-20T16:52:41Z","fingerprint":"0723e2194193901b2d67e83d5dc9b838e9451949","fileCount":160,"truncated":false} -->
 
 ### (root)/
 - `.gitignore`
@@ -121,7 +121,6 @@ Generated: 2026-06-20T16:09:40Z | Files: 161 | Described: 0/161
 - `backend/notebooks/04_physical_modeling.ipynb`
 - `backend/notebooks/05_anomaly_detection.ipynb`
 - `backend/notebooks/06_energy_controls.ipynb`
-- `backend/notebooks/06_energy_controls.nbconvert.ipynb`
 - `backend/notebooks/py.typed`
 - `backend/notebooks/utils.py`
 
