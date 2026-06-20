@@ -1,5 +1,12 @@
 import { useState, useEffect, useRef } from 'react'
-import { rooms as mockRooms, buildingStats as mockStats } from '../data/mockData'
+
+const EMPTY_STATS = {
+  savings: { kwh: { today: 0 }, co2: { today: 0 }, eur: { today: 0 } },
+  weather: { temp: 0, condition: '—', humidity: 0 },
+  activeUnits: 0,
+  totalUnits:  0,
+  alerts:      0,
+}
 
 function applyDrift(rooms) {
   return rooms.map(room => ({
@@ -55,8 +62,8 @@ function collectActiveAlerts(rooms) {
 }
 
 export function useBackendStatus() {
-  const [rooms,      setRooms]      = useState(mockRooms)
-  const [stats,      setStats]      = useState(mockStats)
+  const [rooms,      setRooms]      = useState([])
+  const [stats,      setStats]      = useState(EMPTY_STATS)
   const [connected,  setConnected]  = useState(false)
   const [newAlerts,  setNewAlerts]  = useState([])   // toasts queue
   const [allAlerts,  setAllAlerts]  = useState([])   // full active list
@@ -77,7 +84,7 @@ export function useBackendStatus() {
         if (!live) return
         if (res.ok) {
           const data = await res.json()
-          const nextRooms = data.rooms ?? mockRooms
+          const nextRooms = data.rooms ?? []
           setRooms(nextRooms)
 
           if (data.savings || data.weather || data.stats) {
