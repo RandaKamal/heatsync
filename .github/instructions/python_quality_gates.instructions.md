@@ -63,8 +63,10 @@ repository helper scripts:
 - `ci-lint.yml` runs Ruff lint, Ruff format check, Mypy, Bandit, and `uv audit`
   against `backend/`.
 - `ci-tests.yml` compiles and runs backend tests when present.
-- `ci-slow-lane.yml` runs backend-focused slower checks and skips unavailable
-  optional stages cleanly.
+- `ci-slow-lane.yml` runs backend-focused slower checks for pushes to `main`,
+  scheduled/manual runs, and PRs with commits authored by
+  `google-labs-jules[bot]`. It skips the slow job for other PRs so routine PR
+  checks stay lightweight.
 
 ## Notes
 

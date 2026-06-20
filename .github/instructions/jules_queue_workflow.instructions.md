@@ -57,6 +57,7 @@ Before opening a PR, Jules must:
 
   ```bash
   uv sync --project backend --frozen --dev
+  uvx pre-commit run --hook-stage manual --all-files
   uv run --project backend ruff check --config backend/pyproject.toml backend
   uv run --project backend ruff format --config backend/pyproject.toml --check backend
   uv run --project backend mypy --config-file backend/pyproject.toml backend
