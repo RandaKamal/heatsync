@@ -4,7 +4,7 @@ estimated_files: 3
 skills_used: []
 ---
 
-# T01: Implement shared utility module backend/notebooks/utils.py
+# T01: Delivered the shared notebook preprocessing utility surface for HeatSync CSV loading, 15-minute alignment, interpolation metadata, occupancy flags, feature engineering, and processed CSV caching.
 
 **Why:** Every downstream notebook (S02–S06) needs consistent CSV loading, 15-minute clock alignment, interpolation tracking, and feature engineering. Centralizing this in utils.py prevents duplication and ensures all slices work from the same preprocessed data.
 

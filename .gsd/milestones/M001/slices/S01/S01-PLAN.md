@@ -21,17 +21,17 @@ S01 produces backend/notebooks/utils.py consumed by all downstream notebooks S02
 
 ## Tasks
 
-- [ ] **T01: Implement shared utility module backend/notebooks/utils.py** `est:2–3 hours`
+- [x] **T01: Delivered the shared notebook preprocessing utility surface for HeatSync CSV loading, 15-minute alignment, interpolation metadata, occupancy flags, feature engineering, and processed CSV caching.** `est:2–3 hours`
   **Why:** Every downstream notebook (S02–S06) needs consistent CSV loading, 15-minute clock alignment, interpolation tracking, and feature engineering. Centralizing this in utils.py prevents duplication and ensures all slices work from the same preprocessed data.
   - Files: `backend/notebooks/utils.py`, `backend/notebooks/__init__.py`, `backend/data/processed/.gitkeep`
   - Verify: uv run --project backend python -c "import notebooks.utils; print('import ok')" && uv run --project backend ruff check --config backend/pyproject.toml backend/notebooks/utils.py && uv run --project backend ruff format --config backend/pyproject.toml --check backend/notebooks/utils.py
 
-- [ ] **T02: Write unit tests for utils.py preprocessing functions** `est:1–2 hours`
+- [x] **T02: Implemented comprehensive pytest coverage for preprocessing utilities in test_utils.py.** `est:1–2 hours`
   **Why:** utils.py is the shared foundation for 6 downstream notebooks. Automated tests catch regressions early and prove the alignment, feature engineering, and error handling contracts.
   - Files: `backend/tests/test_utils.py`
   - Verify: uv run --project backend pytest backend/tests/test_utils.py -v && uv run --project backend ruff check --config backend/pyproject.toml backend/tests/test_utils.py
 
-- [ ] **T03: Create 01_preprocessing.ipynb teaching notebook** `est:2–3 hours`
+- [x] **T03: Created 01_preprocessing.ipynb teaching walkthrough notebook and cached processed heating/cooling datasets.** `est:2–3 hours`
   **Why:** The preprocessing notebook is the primary deliverable users interact with. It must demonstrate the full raw-to-aligned pipeline as a readable walkthrough and cache processed artifacts for downstream notebooks.
   - Files: `backend/notebooks/01_preprocessing.ipynb`
   - Verify: uv run --project backend jupyter nbconvert --to notebook --execute backend/notebooks/01_preprocessing.ipynb --ExecutePreprocessor.timeout=120 --output /tmp/test_01_output.ipynb

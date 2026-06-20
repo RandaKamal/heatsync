@@ -4,7 +4,7 @@ estimated_files: 1
 skills_used: []
 ---
 
-# T03: Create 01_preprocessing.ipynb teaching notebook
+# T03: Created 01_preprocessing.ipynb teaching walkthrough notebook and cached processed heating/cooling datasets.
 
 **Why:** The preprocessing notebook is the primary deliverable users interact with. It must demonstrate the full raw-to-aligned pipeline as a readable walkthrough and cache processed artifacts for downstream notebooks.
 

@@ -1,7 +1,7 @@
 # Codebase Map
 
-Generated: 2026-06-20T08:00:19Z | Files: 142 | Described: 0/142
-<!-- gsd:codebase-meta {"generatedAt":"2026-06-20T08:00:19Z","fingerprint":"fcf307f4482737f96debf980873ec602a581493f","fileCount":142,"truncated":false} -->
+Generated: 2026-06-20T11:03:07Z | Files: 147 | Described: 0/147
+<!-- gsd:codebase-meta {"generatedAt":"2026-06-20T11:03:07Z","fingerprint":"c2e22eaae39becfbdae7ed2225f442d726e037e1","fileCount":147,"truncated":false} -->
 
 ### (root)/
 - `.gitignore`
@@ -112,6 +112,12 @@ Generated: 2026-06-20T08:00:19Z | Files: 142 | Described: 0/142
 - `backend/impact/__init__.py`
 - `backend/impact/calculator.py`
 
+### backend/notebooks/
+- `backend/notebooks/__init__.py`
+- `backend/notebooks/01_preprocessing.ipynb`
+- `backend/notebooks/py.typed`
+- `backend/notebooks/utils.py`
+
 ### backend/prediction/
 - `backend/prediction/__init__.py`
 - `backend/prediction/predictor.py`
@@ -120,6 +126,7 @@ Generated: 2026-06-20T08:00:19Z | Files: 142 | Described: 0/142
 - `backend/tests/test_api.py`
 - `backend/tests/test_impact.py`
 - `backend/tests/test_loader.py`
+- `backend/tests/test_utils.py`
 
 ### backups/ihl-twinguard-3d/
 - `backups/ihl-twinguard-3d/.gitignore`

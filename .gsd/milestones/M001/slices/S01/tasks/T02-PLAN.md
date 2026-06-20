@@ -4,7 +4,7 @@ estimated_files: 1
 skills_used: []
 ---
 
-# T02: Write unit tests for utils.py preprocessing functions
+# T02: Implemented comprehensive pytest coverage for preprocessing utilities in test_utils.py.
 
 **Why:** utils.py is the shared foundation for 6 downstream notebooks. Automated tests catch regressions early and prove the alignment, feature engineering, and error handling contracts.
 
