@@ -4,15 +4,6 @@ This file is the explicit capability and coverage contract for the project.
 
 ## Active
 
-### R003 — Train LSTMs for base prediction (L1) and correct residuals using weather/occupancy variables (L2).
-- Class: core-capability
-- Status: active
-- Description: Train LSTMs for base prediction (L1) and correct residuals using weather/occupancy variables (L2).
-- Why it matters: To demonstrate deep learning time-series forecasting and two-level residual error correction.
-- Source: user
-- Primary owning slice: M001-992333/S03
-- Validation: mapped
-
 ### R004 — Calibrate a 2R2C grey-box model and construct a Physics-Informed Neural Network (PINN) in PyTorch.
 - Class: core-capability
 - Status: active
@@ -70,6 +61,16 @@ This file is the explicit capability and coverage contract for the project.
 - Validation: Validated via end-to-end nbconvert programmatic execution of backend/notebooks/02_forecasting_sarimax.ipynb producing evaluation metrics (RMSE, MAPE) and plots, alongside passing pytest suite on backend/tests/test_sarimax.py.
 - Notes: Validated in S02: backend/notebooks/02_forecasting_sarimax.ipynb execution programmatically with zero exceptions. SARIMAX models forecast indoor room temperatures (both heating and cooling windows) and print evaluation metrics (RMSE and MAPE) and plot forecast-versus-actual charts. Verified via pytest unit tests (backend/tests/test_sarimax.py).
 
+### R003 — Train LSTMs for base prediction (L1) and correct residuals using weather/occupancy variables (L2).
+- Class: core-capability
+- Status: validated
+- Description: Train LSTMs for base prediction (L1) and correct residuals using weather/occupancy variables (L2).
+- Why it matters: To demonstrate deep learning time-series forecasting and two-level residual error correction.
+- Source: user
+- Primary owning slice: M001-992333/S03
+- Validation: Validated via end-to-end nbconvert programmatic execution of backend/notebooks/03_forecasting_lstm.ipynb producing base (L1) and residual-corrected (L2) evaluation metrics (RMSE, MAPE) and plots, alongside passing pytest suite on backend/tests/test_lstm.py.
+- Notes: Validated in S03: PyTorch LSTM L1 base model and L2 residual correction implemented and evaluated in backend/notebooks/03_forecasting_lstm.ipynb, producing finite positive RMSE and MAPE values for both heating and cooling periods. Verified by tests under backend/tests/test_lstm.py.
+
 ## Deferred
 
 ## Out of Scope
@@ -80,7 +81,7 @@ This file is the explicit capability and coverage contract for the project.
 |---|---|---|---|---|---|
 | R001 | core-capability | validated | M001-992333/S01 | none | Validated in S01: backend/notebooks/utils.py loading, downsampling/alignment, interpolation tracking, weather/time/envelope feature engineering, and notebook execution (backend/notebooks/01_preprocessing.ipynb) passing programmatically via nbconvert with cached processed artifacts in backend/data/processed/. |
 | R002 | core-capability | validated | M001-992333/S02 | none | Validated via end-to-end nbconvert programmatic execution of backend/notebooks/02_forecasting_sarimax.ipynb producing evaluation metrics (RMSE, MAPE) and plots, alongside passing pytest suite on backend/tests/test_sarimax.py. |
-| R003 | core-capability | active | M001-992333/S03 | none | mapped |
+| R003 | core-capability | validated | M001-992333/S03 | none | Validated via end-to-end nbconvert programmatic execution of backend/notebooks/03_forecasting_lstm.ipynb producing base (L1) and residual-corrected (L2) evaluation metrics (RMSE, MAPE) and plots, alongside passing pytest suite on backend/tests/test_lstm.py. |
 | R004 | core-capability | active | M001-992333/S04 | none | mapped |
 | R005 | core-capability | active | M001-992333/S05 | none | mapped |
 | R006 | core-capability | active | M001-992333/S06 | none | mapped |
@@ -88,7 +89,7 @@ This file is the explicit capability and coverage contract for the project.
 
 ## Coverage Summary
 
-- Active requirements: 5
-- Mapped to slices: 5
-- Validated: 2 (R001, R002)
+- Active requirements: 4
+- Mapped to slices: 4
+- Validated: 3 (R001, R002, R003)
 - Unmapped active requirements: 0

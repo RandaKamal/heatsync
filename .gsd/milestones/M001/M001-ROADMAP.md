@@ -19,7 +19,7 @@
 - [x] **S02: Statistical Temperature Forecasting (SARIMAX)** `risk:low` `depends:[S01]`
   > After this: Runs 02_forecasting_sarimax.ipynb showing SARIMAX temperature forecast with RMSE and MAPE metrics logged in output cells.
 
-- [ ] **S03: LSTM and Two-Level Forecasting Models** `risk:medium` `depends:[S01]`
+- [x] **S03: LSTM and Two-Level Forecasting Models** `risk:medium` `depends:[S01]`
   > After this: Runs 03_forecasting_lstm.ipynb showing PyTorch LSTM base predictions and L2 residual correction with metrics.
 
 - [ ] **S04: Physical Grey-Box and PINN Models** `[sketch]` `risk:high` `depends:[S01]`

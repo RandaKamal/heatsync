@@ -38,7 +38,7 @@ Consumes `backend/notebooks/utils.py` (load_processed, feature columns) and `bac
   - Files: `backend/tests/test_lstm.py`
   - Verify: uv run --project backend pytest backend/tests/test_lstm.py -v
 
-- [ ] **T03: Quality gates and end-to-end verification** `est:S`
+- [x] **T03: Verified the S03 LSTM forecasting notebook and backend suite end to end, closing lint, type, security, compile, test, notebook execution, and metric-output gates.** `est:S`
   ## Why
   Ensures all new S03 files pass the project's Python quality gates (ruff, mypy, bandit) and that the full test suite still passes including pre-existing S01/S02 tests. This is the final verification gate before the slice can be marked complete.
   - Files: `backend/tests/test_lstm.py`, `backend/notebooks/03_forecasting_lstm.ipynb`
