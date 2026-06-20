@@ -13,6 +13,7 @@ NOTEBOOKS = [
     "04_physical_modeling.ipynb",
     "05_anomaly_detection.ipynb",
     "06_energy_controls.ipynb",
+    "07_event_based_device_control.ipynb",
 ]
 
 

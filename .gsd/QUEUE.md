@@ -1,3 +1,3 @@
 # Queue
 
-- 🔄 **M001-992333: HeatSync Modeling and Controls Notebooks**
+- 🔄 **M002-iiz0fq: Event-Based Device-Level Heat Pump Control**
