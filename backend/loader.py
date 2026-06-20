@@ -15,14 +15,14 @@ def snapshots(window="heating"):
     now = datetime.now()
     return pd.DataFrame([
         {
-            "device_id": "ORION-01", 
-            "last_seen_at": now, 
+            "device_id": "ORION-01",
+            "last_seen_at": now,
             "status_temperature_in_celsius": 21.5,
             "status_humidity_in_percent": 45.0
         },
         {
-            "device_id": "ORION-02", 
-            "last_seen_at": now, 
+            "device_id": "ORION-02",
+            "last_seen_at": now,
             "status_temperature_in_celsius": 19.8,
             "status_humidity_in_percent": 50.0
         }
