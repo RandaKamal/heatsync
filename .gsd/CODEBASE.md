@@ -1,7 +1,7 @@
 # Codebase Map
 
-Generated: 2026-06-20T15:27:48Z | Files: 157 | Described: 0/157
-<!-- gsd:codebase-meta {"generatedAt":"2026-06-20T15:27:48Z","fingerprint":"bfab4110dc66f890fd3cdd445cbdca648ad06ced","fileCount":157,"truncated":false} -->
+Generated: 2026-06-20T16:09:40Z | Files: 161 | Described: 0/161
+<!-- gsd:codebase-meta {"generatedAt":"2026-06-20T16:09:40Z","fingerprint":"0758260f95003455206a25499b1e55df1a2b951c","fileCount":161,"truncated":false} -->
 
 ### (root)/
 - `.gitignore`
@@ -120,6 +120,8 @@ Generated: 2026-06-20T15:27:48Z | Files: 157 | Described: 0/157
 - `backend/notebooks/03_forecasting_lstm.ipynb`
 - `backend/notebooks/04_physical_modeling.ipynb`
 - `backend/notebooks/05_anomaly_detection.ipynb`
+- `backend/notebooks/06_energy_controls.ipynb`
+- `backend/notebooks/06_energy_controls.nbconvert.ipynb`
 - `backend/notebooks/py.typed`
 - `backend/notebooks/utils.py`
 
@@ -131,9 +133,11 @@ Generated: 2026-06-20T15:27:48Z | Files: 157 | Described: 0/157
 - `backend/tests/test_anomaly_detection.py`
 - `backend/tests/test_anomaly.py`
 - `backend/tests/test_api.py`
+- `backend/tests/test_energy.py`
 - `backend/tests/test_impact.py`
 - `backend/tests/test_loader.py`
 - `backend/tests/test_lstm.py`
+- `backend/tests/test_notebooks.py`
 - `backend/tests/test_physical.py`
 - `backend/tests/test_sarimax.py`
 - `backend/tests/test_utils.py`

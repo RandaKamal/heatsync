@@ -27,13 +27,13 @@ Consumes backend/notebooks/utils.py (load_processed) from S01 and replicates S04
 
 ## Tasks
 
-- [ ] **T01: Build 06_energy_controls.ipynb with occupancy, comfort, setback, and savings logic** `est:2-3 hours`
+- [x] **T01: Built 06_energy_controls.ipynb with 2R2C calibration, occupancy heat gains, setback scenarios, savings, and comfort compliance analysis.** `est:2-3 hours`
   ## Why
   R006 requires estimating heating/cooling power draw, calculating occupancy sensible/latent heat gains, and evaluating setpoint setbacks. This task creates the complete energy controls notebook.
   - Files: `backend/notebooks/06_energy_controls.ipynb`
   - Verify: uv run --project backend jupyter nbconvert --to notebook --execute --ExecutePreprocessor.timeout=300 backend/notebooks/06_energy_controls.ipynb && echo 'Notebook executed successfully'
 
-- [ ] **T02: Create test_energy.py with scenario logic and notebook execution tests** `est:1-2 hours`
+- [x] **T02: Created test_energy.py with scenario logic and notebook execution tests** `est:1-2 hours`
   ## Why
   The milestone requires automated verification. R006 validation needs proof that occupancy heat gains, setback scenarios, and savings calculations produce correct results. The test follows the pattern established by S04's test_physical.py.
   - Files: `backend/tests/test_energy.py`

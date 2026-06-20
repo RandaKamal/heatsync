@@ -13,24 +13,6 @@ This file is the explicit capability and coverage contract for the project.
 - Primary owning slice: M001-992333/S04
 - Validation: mapped
 
-### R006 — Estimate heating/cooling power draw, calculate occupancy sensible/latent heat gains, and evaluate setpoint setbacks.
-- Class: core-capability
-- Status: active
-- Description: Estimate heating/cooling power draw, calculate occupancy sensible/latent heat gains, and evaluate setpoint setbacks.
-- Why it matters: To calculate potential energy savings and optimize HVAC controls under varying schedules.
-- Source: user
-- Primary owning slice: M001-992333/S06
-- Validation: mapped
-
-### R007 — Develop a python script to run all notebooks end-to-end to ensure zero exceptions.
-- Class: quality-attribute
-- Status: active
-- Description: Develop a python script to run all notebooks end-to-end to ensure zero exceptions.
-- Why it matters: To guarantee that the entire notebook suite executes correctly without runtime errors.
-- Source: inferred
-- Primary owning slice: M001-992333/S07
-- Validation: mapped
-
 ## Validated
 
 ### R001 — Load CSV datasets, align to 15-minute clock, impute missing values, and engineer time/weather/envelope features.
@@ -72,6 +54,26 @@ This file is the explicit capability and coverage contract for the project.
 - Validation: Validated via end-to-end nbconvert execution of backend/notebooks/05_anomaly_detection.ipynb and passing pytest suite on backend/tests/test_anomaly.py.
 - Notes: Validated in S05: Implemented Isolation Forest, One-Class SVM, and PyTorch Autoencoder detectors in backend/notebooks/05_anomaly_detection.ipynb. Generated a ranked shortlist of anomaly candidates using a combined normalized score and vote count, integrated with Modbus error register alarm flags. Verified via pytest suite in backend/tests/test_anomaly.py covering all models and notebook programmatic execution.
 
+### R006 — Estimate heating/cooling power draw, calculate occupancy sensible/latent heat gains, and evaluate setpoint setbacks.
+- Class: core-capability
+- Status: validated
+- Description: Estimate heating/cooling power draw, calculate occupancy sensible/latent heat gains, and evaluate setpoint setbacks.
+- Why it matters: To calculate potential energy savings and optimize HVAC controls under varying schedules.
+- Source: user
+- Primary owning slice: M001-992333/S06
+- Validation: Validated via programmatic nbconvert execution of 06_energy_controls.ipynb and pytest test suite on backend/tests/test_energy.py verifying comfort constraints, occupancy schedules, sensible/latent heat gains, 2R2C thermostat control loops, and scenario-based HVAC kWh savings.
+- Notes: Estimated heating/cooling power draw, occupancy sensible/latent heat gains, and setback strategies validated through backend/notebooks/06_energy_controls.ipynb programmatic execution and backend/tests/test_energy.py tests.
+
+### R007 — Develop a python script to run all notebooks end-to-end to ensure zero exceptions.
+- Class: quality-attribute
+- Status: validated
+- Description: Develop a python script to run all notebooks end-to-end to ensure zero exceptions.
+- Why it matters: To guarantee that the entire notebook suite executes correctly without runtime errors.
+- Source: inferred
+- Primary owning slice: M001-992333/S07
+- Validation: Verified end-to-end notebook execution via pytest in backend/tests/test_notebooks.py. All 6 notebooks executed programmatically and passed with zero uncaught exceptions in 65s.
+- Notes: Validated in S07: Developed backend/tests/test_notebooks.py running all 6 notebooks end-to-end programmatically via ExecutePreprocessor. Verified via pytest exiting with 0.
+
 ## Deferred
 
 ## Out of Scope
@@ -85,12 +87,12 @@ This file is the explicit capability and coverage contract for the project.
 | R003 | core-capability | validated | M001-992333/S03 | none | Validated via end-to-end nbconvert programmatic execution of backend/notebooks/03_forecasting_lstm.ipynb producing base (L1) and residual-corrected (L2) evaluation metrics (RMSE, MAPE) and plots, alongside passing pytest suite on backend/tests/test_lstm.py. |
 | R004 | core-capability | active | M001-992333/S04 | none | mapped |
 | R005 | core-capability | validated | M001-992333/S05 | none | Validated via end-to-end nbconvert execution of backend/notebooks/05_anomaly_detection.ipynb and passing pytest suite on backend/tests/test_anomaly.py. |
-| R006 | core-capability | active | M001-992333/S06 | none | mapped |
-| R007 | quality-attribute | active | M001-992333/S07 | none | mapped |
+| R006 | core-capability | validated | M001-992333/S06 | none | Validated via programmatic nbconvert execution of 06_energy_controls.ipynb and pytest test suite on backend/tests/test_energy.py verifying comfort constraints, occupancy schedules, sensible/latent heat gains, 2R2C thermostat control loops, and scenario-based HVAC kWh savings. |
+| R007 | quality-attribute | validated | M001-992333/S07 | none | Verified end-to-end notebook execution via pytest in backend/tests/test_notebooks.py. All 6 notebooks executed programmatically and passed with zero uncaught exceptions in 65s. |
 
 ## Coverage Summary
 
-- Active requirements: 3
-- Mapped to slices: 3
-- Validated: 4 (R001, R002, R003, R005)
+- Active requirements: 1
+- Mapped to slices: 1
+- Validated: 6 (R001, R002, R003, R005, R006, R007)
 - Unmapped active requirements: 0

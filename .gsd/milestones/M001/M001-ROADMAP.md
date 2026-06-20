@@ -28,10 +28,10 @@
 - [x] **S05: Anomaly Detection Models** `risk:medium` `depends:[S01]`
   > After this: Runs 05_anomaly_detection.ipynb listing flagged anomaly timestamps from Isolation Forest, One-Class SVM, and Autoencoder.
 
-- [ ] **S06: Energy Controls and Savings Optimization** `risk:medium` `depends:[S01,S04]`
+- [x] **S06: Energy Controls and Savings Optimization** `risk:medium` `depends:[S01,S04]`
   > After this: Runs 06_energy_controls.ipynb showing occupancy heat gains, comfort setpoints, and estimated HVAC kWh savings from setback strategies.
 
-- [ ] **S07: Automated Notebook Suite Verification** `[sketch]` `risk:low` `depends:[S02,S03,S04,S05,S06]`
+- [x] **S07: Automated Notebook Suite Verification** `risk:low` `depends:[S02,S03,S04,S05,S06]`
   > After this: Runs backend/tests/test_notebooks.py executing all 6 notebooks programmatically with zero exceptions.
 
 ## Boundary Map

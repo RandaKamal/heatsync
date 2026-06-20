@@ -4,7 +4,7 @@ estimated_files: 1
 skills_used: []
 ---
 
-# T02: Create test_energy.py with scenario logic and notebook execution tests
+# T02: Created test_energy.py with scenario logic and notebook execution tests
 
 ## Why
 The milestone requires automated verification. R006 validation needs proof that occupancy heat gains, setback scenarios, and savings calculations produce correct results. The test follows the pattern established by S04's test_physical.py.
