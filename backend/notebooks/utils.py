@@ -11,6 +11,9 @@ import pandas as pd
 
 logger = logging.getLogger(__name__)
 
+# Dynamically resolve project root relative to this file (backend/notebooks/utils.py)
+PROJECT_ROOT = pathlib.Path(__file__).resolve().parent.parent.parent
+
 WINDOW_DIRS: dict[str, str] = {
     "heating": "backend/data/heating_2026-03-30_to_2026-04-05",
     "cooling": "backend/data/cooling_2026-05-25_to_2026-05-31",
@@ -120,9 +123,10 @@ def load_snapshots(window: str) -> pd.DataFrame:
     """
     if window not in WINDOW_DIRS:
         raise ValueError(f"Unknown window '{window}'. Expected one of: {list(WINDOW_DIRS.keys())}")
-    path = f"{WINDOW_DIRS[window]}/heat_pump_snapshots.csv"
+    path = PROJECT_ROOT / f"{WINDOW_DIRS[window]}/heat_pump_snapshots.csv"
+    path_str = str(path)
     df = pd.read_csv(path)
-    validate_columns(df, "snapshots", path)
+    validate_columns(df, "snapshots", path_str)
     df["last_seen_at"] = pd.to_datetime(df["last_seen_at"])
     df.set_index("last_seen_at", inplace=True)
     return df
@@ -134,9 +138,10 @@ def load_intervals(window: str) -> pd.DataFrame:
     """
     if window not in WINDOW_DIRS:
         raise ValueError(f"Unknown window '{window}'. Expected one of: {list(WINDOW_DIRS.keys())}")
-    path = f"{WINDOW_DIRS[window]}/heat_pump_intervals.csv"
+    path = PROJECT_ROOT / f"{WINDOW_DIRS[window]}/heat_pump_intervals.csv"
+    path_str = str(path)
     df = pd.read_csv(path)
-    validate_columns(df, "intervals", path)
+    validate_columns(df, "intervals", path_str)
     df["interval_start_time"] = pd.to_datetime(df["interval_start_time"])
     df.set_index("interval_start_time", inplace=True)
     return df
@@ -148,9 +153,10 @@ def load_power_draw(window: str) -> pd.DataFrame:
     """
     if window not in WINDOW_DIRS:
         raise ValueError(f"Unknown window '{window}'. Expected one of: {list(WINDOW_DIRS.keys())}")
-    path = f"{WINDOW_DIRS[window]}/power_draw.csv"
+    path = PROJECT_ROOT / f"{WINDOW_DIRS[window]}/power_draw.csv"
+    path_str = str(path)
     df = pd.read_csv(path)
-    validate_columns(df, "power_draw", path)
+    validate_columns(df, "power_draw", path_str)
     df["timestamp"] = pd.to_datetime(df["timestamp"])
     return df
 
@@ -161,9 +167,10 @@ def load_space_events(window: str) -> pd.DataFrame:
     """
     if window not in WINDOW_DIRS:
         raise ValueError(f"Unknown window '{window}'. Expected one of: {list(WINDOW_DIRS.keys())}")
-    path = f"{WINDOW_DIRS[window]}/space_events.csv"
+    path = PROJECT_ROOT / f"{WINDOW_DIRS[window]}/space_events.csv"
+    path_str = str(path)
     df = pd.read_csv(path)
-    validate_columns(df, "space_events", path)
+    validate_columns(df, "space_events", path_str)
     df["starts_at"] = pd.to_datetime(df["starts_at"])
     df["ends_at"] = pd.to_datetime(df["ends_at"])
     return df
@@ -376,6 +383,8 @@ def save_processed(
     Save the aligned DataFrame as a CSV file in output_dir.
     """
     out_path = pathlib.Path(output_dir)
+    if not out_path.is_absolute():
+        out_path = PROJECT_ROOT / out_path
     out_path.mkdir(parents=True, exist_ok=True)
     file_path = out_path / f"{window}_processed.csv"
     # Ensure index is saved as a column
@@ -387,7 +396,10 @@ def load_processed(window: str, output_dir: str = "backend/data/processed") -> p
     """
     Load a cached processed CSV file and set timestamp as datetime index.
     """
-    file_path = pathlib.Path(output_dir) / f"{window}_processed.csv"
+    out_path = pathlib.Path(output_dir)
+    if not out_path.is_absolute():
+        out_path = PROJECT_ROOT / out_path
+    file_path = out_path / f"{window}_processed.csv"
     if not file_path.exists():
         raise FileNotFoundError(f"Processed file not found: {file_path}")
     df = pd.read_csv(file_path)
