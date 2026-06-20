@@ -1,3 +1,8 @@
+# ruff: noqa: PLR0911, PLR0912, PLR0915, PLR2004
+# Existing UI aggregation helpers intentionally retain readable inline thresholds.
+
+import logging
+import math
 from datetime import UTC, datetime
 
 import comfort.model as comfort
@@ -13,6 +18,7 @@ from api.weather import DEFAULT_LAT, DEFAULT_LON, fetch_current, fetch_forecast
 
 api_bp = Blueprint("api", __name__, url_prefix="/api")
 
+LOGGER = logging.getLogger(__name__)
 SPACE_ID = "3dbed10b-9e88-4163-916d-3182e2ecc69f"
 
 
@@ -431,9 +437,12 @@ IHL_SAVINGS_FACTOR = 0.25
 
 
 def _weather_label(code: object) -> str:
-    if code is None:
+    if code is None or not isinstance(code, int | float | str):
         return "Clear"
-    c = int(code)  # type: ignore[arg-type]
+    try:
+        c = int(code)
+    except ValueError:
+        return "Clear"
     if c == 0:
         return "Clear"
     if 1 <= c <= 3:
@@ -470,7 +479,7 @@ def _make_offline_room(cfg: dict) -> dict:
 def _safe_float(val: object, default: float = 0.0) -> float:
     try:
         v = float(val)  # type: ignore[arg-type]
-        return default if (v != v) else v  # NaN guard
+        return default if math.isnan(v) else v
     except (TypeError, ValueError):
         return default
 
@@ -492,8 +501,6 @@ def _compute_advice(
     Compute occupancy status, ETA to target, efficiency, and a plain-language
     recommendation for the detail panel.
     """
-    from datetime import datetime
-
     now_utc = datetime.now(UTC)
     hour = now_utc.hour + now_utc.minute / 60.0
 
@@ -520,7 +527,7 @@ def _compute_advice(
 
     # ── Heating / cooling rate from historical intervals ──────────────────────
     # Prefer cooling-window data; fall back to heating window; then physics default.
-    # Typical ORIO-025 in a 150 m² room: ~0.4–0.6 °C per 15 min under load.
+    # Typical ORIO-025 in a 150 m² room: ~0.4-0.6 °C per 15 min under load.
     HEAT_RATE_DEFAULT = 0.5  # °C per 15-min interval (heating)
     COOL_RATE_DEFAULT = -0.4  # °C per 15-min interval (cooling)
 
@@ -549,8 +556,8 @@ def _compute_advice(
             heat_rate, cool_rate = _rates_from_ivs(heat_ivs)
             if heat_rate != 0.0 or cool_rate != 0.0:
                 rate_source = "measured (heating window)"
-        except Exception:
-            pass
+        except Exception as exc:
+            LOGGER.debug("Falling back to default HVAC temperature rates", exc_info=exc)
 
     # Physics default if still no data
     if heat_rate == 0.0:
@@ -641,17 +648,15 @@ def _compute_advice(
         mismatch = (
             f" Currently in {mode_upper} mode — switch to HEAT." if mode_upper == "COOL" else ""
         )
-        rec_lines.append(
-            f"Room {temp_c:.1f}°C is {delta:.1f}°C below target.{mismatch or (' ' + action if action else '')}"
-        )
+        mode_hint = mismatch or (" " + action if action else "")
+        rec_lines.append(f"Room {temp_c:.1f}°C is {delta:.1f}°C below target.{mode_hint}")
     elif needs_cool:
         action = "Set mode to COOL." if mode_upper not in ("COOL", "AUTO") else ""
         mismatch = (
             f" Currently in {mode_upper} mode — switch to COOL." if mode_upper == "HEAT" else ""
         )
-        rec_lines.append(
-            f"Room {temp_c:.1f}°C is {abs(delta):.1f}°C above target.{mismatch or (' ' + action if action else '')}"
-        )
+        mode_hint = mismatch or (" " + action if action else "")
+        rec_lines.append(f"Room {temp_c:.1f}°C is {abs(delta):.1f}°C above target.{mode_hint}")
     else:
         rec_lines.append(f"Room is at target {target:.1f}°C. AUTO mode is sufficient.")
 
@@ -720,8 +725,8 @@ def frontend_status() -> Response:
             "humidity": int(_safe_float(curr.get("relative_humidity_2m"), 60)),
             "condition": _weather_label(curr.get("weather_code")),
         }
-    except Exception:
-        pass
+    except Exception as exc:
+        LOGGER.debug("Falling back to default frontend weather", exc_info=exc)
 
     outside_temp = weather["temp"]
 
@@ -732,7 +737,7 @@ def frontend_status() -> Response:
     alert_count = 0
 
     for cfg in _ROOM_MAP:
-        did = cfg["device_id"]
+        did = str(cfg["device_id"])
         dev_snaps = df[df["device_id"] == did].sort_values("last_seen_at")
 
         if dev_snaps.empty:
@@ -816,7 +821,7 @@ def frontend_status() -> Response:
             # Find nearest outside temp bucket
             out_key = ts.floor("15min")
             out_v = h_out.get(out_key, temp_out)
-            if val != val:  # NaN
+            if math.isnan(val):
                 continue
             temp_history.append(
                 {
@@ -838,7 +843,7 @@ def frontend_status() -> Response:
             baseline_day = actual_day / (1 - IHL_SAVINGS_FACTOR)
             energy_history.append(
                 {
-                    "day": ts.strftime("%a"),
+                    "day": pd.Timestamp(str(ts)).strftime("%a"),
                     "actual": round(actual_day, 1),
                     "baseline": round(baseline_day, 1),
                 }
