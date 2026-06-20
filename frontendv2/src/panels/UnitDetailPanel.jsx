@@ -3,7 +3,7 @@ import {
   LineChart, Line, BarChart, Bar, XAxis, YAxis,
   Tooltip, ResponsiveContainer, CartesianGrid, Legend,
 } from 'recharts'
-import { decodeErrorRegisters } from '../data/errorRegisters'
+import { decodeErrorRegisters } from '../utils/errorRegisters'
 
 // ── SVG Temperature Gauge ───────────────────────────────────────────────────
 

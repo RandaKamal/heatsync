@@ -90,6 +90,8 @@ backend/htmlcov/
 backend/.hypothesis/
 backend/data/*
 !backend/data/.gitkeep
+!backend/data/__init__.py
+!backend/data/loader.py
 
 # Snakemake
 .snakemake/
@@ -146,6 +148,8 @@ __marimo__/
 # Backend data files (CSV datasets, not committed)
 backend/data/*
 !backend/data/.gitkeep
+!backend/data/__init__.py
+!backend/data/loader.py
 
 # Frontend dependencies and build output
 frontend/node_modules/
@@ -153,6 +157,7 @@ frontend/dist/
 frontend/build/
 frontend/.vite/
 frontend/*.tsbuildinfo
+frontend/*.local
 
 # Environment variables and secrets
 .env
@@ -178,4 +183,3 @@ heatsync-failure-simulation-backup-*/
 tmp/
 temp/
 .cache/
-
