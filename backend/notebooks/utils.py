@@ -476,29 +476,88 @@ def build_room_physical_model_frame(
     return room_df.dropna(subset=["T_in", "T_out", "Q_electric_kw", "Q_heat_kw"])
 
 
-def build_device_level_features(df: pd.DataFrame, standby_baseline: float) -> pd.DataFrame:
+KNOWN_DEVICE_ORDER = [
+    "bdaf0e14-2cd1-43c8-b9ea-b3c90309f773",
+    "1c893f75-4599-4402-9d4c-1017aa858fa8",
+    "e72fea56-abe7-4d3f-a0ed-1e6b6c462157",
+    "930f3621-05df-4574-9270-9d994c5b716c",
+]
+
+
+FIFTEEN_MINUTE_HOURS = 0.25
+EVENT_FEATURE_INTERVAL = pd.Timedelta(minutes=15)
+
+
+def _require_datetime_index(df: pd.DataFrame, frame_name: str) -> None:
+    if not isinstance(df.index, pd.DatetimeIndex):
+        raise ValueError(f"{frame_name} must be indexed by timestamp.")
+
+
+def _require_columns(df: pd.DataFrame, required_cols: list[str], frame_name: str) -> None:
+    missing_cols = [col for col in required_cols if col not in df.columns]
+    if missing_cols:
+        raise ValueError(f"{frame_name} is missing columns: {missing_cols}")
+
+
+def _ordered_device_ids(df: pd.DataFrame, expected_devices: int) -> list[str]:
+    observed = [str(device_id) for device_id in pd.Series(df["device_id"]).dropna().unique()]
+    known_observed = [device_id for device_id in KNOWN_DEVICE_ORDER if device_id in observed]
+    unknown_observed = sorted(
+        device_id for device_id in observed if device_id not in KNOWN_DEVICE_ORDER
+    )
+    ordered = known_observed + unknown_observed
+    if len(ordered) < expected_devices:
+        ordered.extend(
+            device_id for device_id in KNOWN_DEVICE_ORDER if device_id not in ordered
+        )
+    return ordered[:expected_devices]
+
+
+def build_device_level_features(
+    df: pd.DataFrame,
+    standby_baseline: float,
+    *,
+    expected_devices: int = 4,
+) -> pd.DataFrame:
     """
-    Pivot long-format device data into wide-format features.
-    Creates columns device_i_active and device_i_power_kw for i=1..4.
-    Activity threshold: was_adjusting_temperature == 1 OR power > standby_baseline.
+    Pivot long-format device data into deterministic wide-format features.
+
+    Creates `device_i_power_kw` and `device_i_active` columns for i=1..4 by
+    default. Device activity means `was_adjusting_temperature == 1` or observed
+    power draw above the supplied standby baseline. Duplicate device/timestamp
+    rows are collapsed with mean power and max adjustment flag before pivoting.
     """
-    device_id_to_num = {
-        "bdaf0e14-2cd1-43c8-b9ea-b3c90309f773": 1,
-        "1c893f75-4599-4402-9d4c-1017aa858fa8": 2,
-        "e72fea56-abe7-4d3f-a0ed-1e6b6c462157": 3,
-        "930f3621-05df-4574-9270-9d994c5b716c": 4,
-    }
-    unique_timestamps = sorted(df.index.unique())
+    if standby_baseline < 0.0:
+        raise ValueError("standby_baseline must be non-negative.")
+    if expected_devices <= 0:
+        raise ValueError("expected_devices must be positive.")
+    _require_datetime_index(df, "Device-level feature data")
+    _require_columns(
+        df,
+        ["device_id", "power_draw_kw", "was_adjusting_temperature"],
+        "Device-level feature data",
+    )
+
+    unique_timestamps = pd.DatetimeIndex(sorted(df.index.unique()), name="timestamp")
     wide_df = pd.DataFrame(index=unique_timestamps)
-    wide_df.index.name = "timestamp"
 
-    for dev_id, dev_num in device_id_to_num.items():
-        dev_df = df[df["device_id"] == dev_id]
-        dev_df = dev_df.reindex(unique_timestamps)
-
-        power = dev_df["power_draw_kw"]
-        was_adjusting = dev_df["was_adjusting_temperature"].fillna(0.0)
-        active = ((was_adjusting == 1.0) | (power > standby_baseline)).astype(float)
+    device_ids = _ordered_device_ids(df, expected_devices)
+    for dev_num, dev_id in enumerate(device_ids, start=1):
+        dev_df = df[df["device_id"].astype(str) == dev_id]
+        if dev_df.empty:
+            power = pd.Series(float("nan"), index=unique_timestamps, dtype="float64")
+            active = pd.Series(0.0, index=unique_timestamps, dtype="float64")
+        else:
+            collapsed = dev_df.groupby(level=0, sort=True).agg(
+                power_draw_kw=("power_draw_kw", "mean"),
+                was_adjusting_temperature=("was_adjusting_temperature", "max"),
+            )
+            collapsed = collapsed.reindex(unique_timestamps)
+            power = pd.to_numeric(collapsed["power_draw_kw"], errors="coerce")
+            was_adjusting = pd.to_numeric(
+                collapsed["was_adjusting_temperature"], errors="coerce"
+            ).fillna(0.0)
+            active = ((was_adjusting == 1.0) | (power > standby_baseline)).astype(float)
 
         wide_df[f"device_{dev_num}_power_kw"] = power
         wide_df[f"device_{dev_num}_active"] = active
@@ -509,15 +568,28 @@ def build_device_level_features(df: pd.DataFrame, standby_baseline: float) -> pd
 def build_room_level_features(df: pd.DataFrame) -> pd.DataFrame:
     """
     Build room-level features by aggregating per-device processed rows.
-    Calculates median for temperature, return-temp, humidity, and CO2,
-    and sum for power and energy.
-    """
-    grouped = df.groupby(df.index)
 
-    timestamps = sorted(df.index.unique())
+    Temperature, return temperature, humidity, and CO2 use a timestamp median;
+    power uses a timestamp sum; energy assumes the 15-minute grid established by
+    the preprocessing pipeline.
+    """
+    _require_datetime_index(df, "Room-level feature data")
+    _require_columns(
+        df,
+        [
+            "status_temperature_in_celsius",
+            "status_temperature_return_in_celsius",
+            "status_humidity_in_percent",
+            "status_carbon_dioxide_in_ppm",
+            "power_draw_kw",
+        ],
+        "Room-level feature data",
+    )
+
+    grouped = df.sort_index().groupby(level=0, sort=True)
+
+    timestamps = pd.DatetimeIndex(sorted(df.index.unique()), name="timestamp")
     room_df = pd.DataFrame(index=timestamps)
-    room_df.index = pd.to_datetime(room_df.index)
-    room_df.index.name = "timestamp"
 
     room_df["room_temp"] = grouped["status_temperature_in_celsius"].median()
     room_df["room_return_temp"] = grouped["status_temperature_return_in_celsius"].median()
@@ -525,7 +597,7 @@ def build_room_level_features(df: pd.DataFrame) -> pd.DataFrame:
     room_df["room_co2"] = grouped["status_carbon_dioxide_in_ppm"].median()
 
     room_df["room_power_kw"] = grouped["power_draw_kw"].sum()
-    room_df["room_energy_kwh"] = room_df["room_power_kw"] * 0.25
+    room_df["room_energy_kwh"] = room_df["room_power_kw"] * FIFTEEN_MINUTE_HOURS
 
     if "outside_temperature" in df.columns:
         room_df["outside_temperature"] = grouped["outside_temperature"].first()
@@ -547,11 +619,20 @@ def build_event_features(
     preconditioning_window_hours: float = 2.0,
 ) -> pd.DataFrame:
     """
-    Build event-based features from space_events.csv.
+    Build event-based features from space_events.csv for a 15-minute grid.
     """
+    if not isinstance(df_index, pd.DatetimeIndex):
+        raise ValueError("df_index must be a DatetimeIndex.")
+    if preconditioning_window_hours < 0.0:
+        raise ValueError("preconditioning_window_hours must be non-negative.")
+    _require_columns(df_space, ["starts_at", "ends_at"], "Space event data")
+
     events = df_space.copy()
     events["starts_at"] = pd.to_datetime(events["starts_at"])
     events["ends_at"] = pd.to_datetime(events["ends_at"])
+    malformed = events["ends_at"] < events["starts_at"]
+    if malformed.any():
+        raise ValueError("Space event data contains events ending before they start.")
     events = events.sort_values("starts_at").reset_index(drop=True)
 
     event_active = []
@@ -561,41 +642,30 @@ def build_event_features(
     next_event_end = []
 
     for t in df_index:
-        t_end = t + pd.Timedelta(minutes=15)
-        # Event is active if there is any overlap
-        is_active = 0
-        for _, ev in events.iterrows():
-            if t < ev["ends_at"] and t_end > ev["starts_at"]:
-                is_active = 1
-                break
-        event_active.append(is_active)
+        t_end = t + EVENT_FEATURE_INTERVAL
+        active_events = events[(t < events["ends_at"]) & (t_end > events["starts_at"])]
+        event_active.append(0 if active_events.empty else 1)
 
-        # Next event start time (first event starting after t)
         future_events = events[events["starts_at"] > t]
-        if not future_events.empty:
+        if future_events.empty:
+            minutes_to_next_event.append(float("nan"))
+            next_event_start.append(pd.NaT)
+            next_event_end.append(pd.NaT)
+        else:
             next_ev = future_events.iloc[0]
-            m_to_next = (next_ev["starts_at"] - t).total_seconds() / 60.0
-            next_start_dt = next_ev["starts_at"]
-            next_end_dt = next_ev["ends_at"]
-        else:
-            m_to_next = float("nan")
-            next_start_dt = pd.NaT
-            next_end_dt = pd.NaT
+            minutes_to_next_event.append((next_ev["starts_at"] - t).total_seconds() / 60.0)
+            next_event_start.append(next_ev["starts_at"])
+            next_event_end.append(next_ev["ends_at"])
 
-        minutes_to_next_event.append(m_to_next)
-        next_event_start.append(next_start_dt)
-        next_event_end.append(next_end_dt)
-
-        # Previous event end time (last event ending before or at t)
         past_events = events[events["ends_at"] <= t]
-        if not past_events.empty:
-            prev_ev = past_events.iloc[-1]
-            m_since_prev = (t - prev_ev["ends_at"]).total_seconds() / 60.0
+        if past_events.empty:
+            minutes_since_previous_event.append(float("nan"))
         else:
-            m_since_prev = float("nan")
-        minutes_since_previous_event.append(m_since_prev)
+            prev_ev = past_events.iloc[-1]
+            minutes_since_previous_event.append((t - prev_ev["ends_at"]).total_seconds() / 60.0)
 
     feat_df = pd.DataFrame(index=df_index)
+    feat_df.index.name = df_index.name or "timestamp"
     feat_df["event_active"] = event_active
     feat_df["minutes_to_next_event"] = minutes_to_next_event
     feat_df["minutes_since_previous_event"] = minutes_since_previous_event

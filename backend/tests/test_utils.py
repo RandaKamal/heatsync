@@ -3,9 +3,13 @@ from collections.abc import Callable
 
 import pandas as pd
 import pytest
+
 from notebooks.utils import (
     align_to_15min,
     build_aligned_dataset,
+    build_device_level_features,
+    build_event_features,
+    build_room_level_features,
     build_room_physical_model_frame,
     load_intervals,
     load_power_draw,
@@ -18,6 +22,7 @@ from notebooks.utils import (
 
 EXPECTED_ALIGNED_ROWS_WITH_LONG_GAP = 8
 EXPECTED_SHORT_GAP_FILL_VALUE = 11.0
+EXPECTED_MINUTES_SINCE_PREVIOUS_EVENT = 15.0
 
 
 def test_load_snapshots_heating() -> None:
@@ -255,6 +260,133 @@ def test_window_validation_rejects_unknown_window(loader: Callable[[str], object
 def test_load_processed_raises_for_missing_cache(tmp_path: pathlib.Path) -> None:
     with pytest.raises(FileNotFoundError, match="Processed file not found"):
         load_processed("heating", output_dir=str(tmp_path))
+
+
+def test_build_device_level_features_pivots_power_and_activity() -> None:
+    timestamps = pd.to_datetime(
+        [
+            "2026-03-30 00:00:00",
+            "2026-03-30 00:00:00",
+            "2026-03-30 00:00:00",
+            "2026-03-30 00:15:00",
+            "2026-03-30 00:15:00",
+        ]
+    )
+    df = pd.DataFrame(
+        {
+            "device_id": ["dev_a", "dev_a", "dev_b", "dev_a", "dev_b"],
+            "power_draw_kw": [0.4, 0.6, 0.2, 1.2, 0.3],
+            "was_adjusting_temperature": [0, 1, 0, 0, 1],
+        },
+        index=timestamps,
+    )
+    df.index.name = "timestamp"
+
+    features = build_device_level_features(df, standby_baseline=1.0, expected_devices=2)
+
+    assert list(features.columns) == [
+        "device_1_power_kw",
+        "device_1_active",
+        "device_2_power_kw",
+        "device_2_active",
+    ]
+    assert features.loc["2026-03-30 00:00:00", "device_1_power_kw"] == pytest.approx(0.5)
+    assert features.loc["2026-03-30 00:00:00", "device_1_active"] == 1.0
+    assert features.loc["2026-03-30 00:15:00", "device_1_active"] == 1.0
+    assert features.loc["2026-03-30 00:15:00", "device_2_active"] == 1.0
+
+
+@pytest.mark.parametrize(
+    ("bad_df", "match"),
+    [
+        (pd.DataFrame({"device_id": ["dev_a"]}), "indexed by timestamp"),
+        (
+            pd.DataFrame(
+                {"device_id": ["dev_a"], "power_draw_kw": [0.1]},
+                index=pd.to_datetime(["2026-03-30 00:00:00"]),
+            ),
+            "was_adjusting_temperature",
+        ),
+    ],
+)
+def test_build_device_level_features_rejects_malformed_inputs(
+    bad_df: pd.DataFrame, match: str
+) -> None:
+    with pytest.raises(ValueError, match=match):
+        build_device_level_features(bad_df, standby_baseline=1.0)
+
+
+def test_build_room_level_features_aggregates_device_rows() -> None:
+    timestamps = pd.to_datetime(
+        [
+            "2026-03-30 00:00:00",
+            "2026-03-30 00:00:00",
+            "2026-03-30 00:15:00",
+            "2026-03-30 00:15:00",
+        ]
+    )
+    df = pd.DataFrame(
+        {
+            "status_temperature_in_celsius": [20.0, 22.0, 21.0, 23.0],
+            "status_temperature_return_in_celsius": [19.0, 21.0, 20.0, 22.0],
+            "status_humidity_in_percent": [40.0, 50.0, 45.0, 55.0],
+            "status_carbon_dioxide_in_ppm": [600.0, 800.0, 700.0, 900.0],
+            "power_draw_kw": [1.0, 2.0, 3.0, 4.0],
+            "outside_temperature": [5.0, 6.0, 7.0, 8.0],
+        },
+        index=timestamps,
+    )
+    df.index.name = "timestamp"
+
+    room = build_room_level_features(df)
+
+    assert list(room["room_temp"]) == [21.0, 22.0]
+    assert list(room["room_return_temp"]) == [20.0, 21.0]
+    assert list(room["room_humidity"]) == [45.0, 50.0]
+    assert list(room["room_co2"]) == [700.0, 800.0]
+    assert list(room["room_power_kw"]) == [3.0, 7.0]
+    assert list(room["room_energy_kwh"]) == [0.75, 1.75]
+    assert list(room["outside_temperature"]) == [5.0, 7.0]
+
+
+def test_build_event_features_marks_active_and_preconditioning_windows() -> None:
+    index = pd.date_range("2026-03-30 00:00:00", periods=6, freq="15min")
+    events = pd.DataFrame(
+        {
+            "starts_at": ["2026-03-30 00:30:00"],
+            "ends_at": ["2026-03-30 01:00:00"],
+        }
+    )
+
+    features = build_event_features(index, events, preconditioning_window_hours=0.5)
+
+    assert list(features["event_active"]) == [0, 0, 1, 1, 0, 0]
+    assert list(features["inside_preconditioning_window"]) == [
+        1.0,
+        1.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+    ]
+    assert pd.isna(features.loc[index[-1], "minutes_to_next_event"])
+    assert (
+        features.loc[index[-1], "minutes_since_previous_event"]
+        == EXPECTED_MINUTES_SINCE_PREVIOUS_EVENT
+    )
+
+
+def test_build_event_features_rejects_events_ending_before_start() -> None:
+    index = pd.date_range("2026-03-30 00:00:00", periods=1, freq="15min")
+    events = pd.DataFrame(
+        {
+            "starts_at": ["2026-03-30 01:00:00"],
+            "ends_at": ["2026-03-30 00:00:00"],
+        }
+    )
+
+    with pytest.raises(ValueError, match="ending before they start"):
+        build_event_features(index, events)
 
 
 def test_build_room_physical_model_frame_aggregates_device_power() -> None:
