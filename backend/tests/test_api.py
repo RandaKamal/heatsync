@@ -1,4 +1,4 @@
-import loader
+import backend.data.loader as loader
 from app import create_app
 
 HTTP_OK = 200

@@ -15,7 +15,7 @@ Rates (Germany 2024-2026):
 """
 
 import pandas as pd
-from loader import devices, intervals, power_draw, power_draw_all
+from data.loader import devices, intervals, power_draw, power_draw_all
 
 ELECTRICITY_PRICE_EUR_PER_KWH = 0.25
 CO2_KG_PER_KWH = 0.380

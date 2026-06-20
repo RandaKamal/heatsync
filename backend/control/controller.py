@@ -12,7 +12,7 @@ Supports:
 from datetime import UTC, datetime
 
 from comfort.model import MAX_EVENT_POWER_FRACTION, MOLD_ABSOLUTE_MIN_CELSIUS
-from loader import devices as load_devices
+from data.loader import devices as load_devices
 
 _DEVICE_IDS = [
     "bdaf0e14-2cd1-43c8-b9ea-b3c90309f773",

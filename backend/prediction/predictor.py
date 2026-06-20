@@ -23,7 +23,7 @@ from comfort.model import (
     comfort_setpoint,
     is_holiday_bavaria,
 )
-from loader import intervals_all
+from data.loader import intervals_all
 
 UNOCCUPIED_SETPOINT = max(11.0, MOLD_SAFE_MIN_CELSIUS)  # enforce mold floor
 BERLIN = ZoneInfo("Europe/Berlin")

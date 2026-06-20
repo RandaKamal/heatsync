@@ -1,4 +1,4 @@
-import loader
+import backend.data.loader as loader
 import pandas as pd
 import pytest
 
