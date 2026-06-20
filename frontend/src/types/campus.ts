@@ -129,6 +129,9 @@ export interface BuildingTelemetryPoint {
   totalOccupancy: number
 }
 
+export type EventRecurrence = 'once' | 'weekly' | 'biweekly' | 'monthly'
+export type WeekDay = 'Mon' | 'Tue' | 'Wed' | 'Thu' | 'Fri' | 'Sat' | 'Sun'
+
 export interface RoomEvent {
   id: string
   roomId: string
@@ -136,6 +139,8 @@ export interface RoomEvent {
   start: string
   end: string
   expectedStudents: number
+  day?: WeekDay
+  recurrence?: EventRecurrence
 }
 
 export interface ControlDecision {

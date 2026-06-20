@@ -1,177 +1,274 @@
-import {
-  useEffect,
-  useMemo,
-  useState,
-} from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { CampusCanvas } from './components/scene/CampusCanvas'
 import { CampusSidebar } from './components/ui/CampusSidebar'
 import { ControlTimeline } from './components/ui/ControlTimeline'
 import { FailureSimulationPanel } from './components/ui/FailureSimulationPanel'
+import { OptimizeModal } from './components/ui/OptimizeModal'
+import type { OptimizeSuggestion } from './components/ui/OptimizeModal'
+import { PokesPanel } from './components/ui/PokesPanel'
+import { RoomDetailsPanel } from './components/ui/RoomDetailsPanel'
+import { TechnicianPanel } from './components/ui/TechnicianPanel'
+import type { Alert, Notification } from './components/ui/TechnicianPanel'
 import { TopBar } from './components/ui/TopBar'
 import {
   plannedActions,
-  roomEvents as mockRoomEvents,
   roomLoadHeatmap,
   weatherForecast as mockWeatherForecast,
 } from './data/mockCampus'
-import { useBackendStatus } from './hooks/useBackendStatus'
 import { useFailureSimulation } from './hooks/useFailureSimulation'
-import { useLiveData } from './hooks/useLiveData'
-import { UnitDetailPanel } from './panels/UnitDetailPanel'
 import {
-  STATUS_COLORS,
-  STATUS_LABELS,
-} from './utils/status'
+  applyOptimization,
+  contactTechnician,
+  createScheduleEvent,
+  fetchAnomalyAlerts,
+  fetchEnergyWindows,
+  fetchImpactByDevice,
+  fetchImpactSummary,
+  fetchNotifications,
+  fetchOptimizeSuggestion,
+  fetchSchedule,
+  type DeviceImpact,
+  type EnergyWindow,
+  type SavingsTotals,
+} from './api/client'
+import type { RoomEvent } from './types/campus'
+import { STATUS_COLORS, STATUS_LABELS } from './utils/status'
 
-const legendStatuses = [
-  'normal',
-  'warming',
-  'at-risk',
-  'fault',
-  'standby',
-] as const
+const legendStatuses = ['normal', 'warming', 'at-risk', 'fault', 'standby'] as const
 
 function App() {
-  const [isLiveMode, setIsLiveMode] = useState(false)
-  const liveData = useLiveData()
-
+  // ── UI state ─────────────────────────────────────────────────────────────
   const [selectedDeviceId, setSelectedDeviceId] = useState<string | null>(null)
+  const [selectedRoomId, setSelectedRoomId]     = useState<string | null>(null)
+  const [pokesOpen, setPokesOpen]               = useState(false)
+  const [simOpen, setSimOpen]                   = useState(false)
+  const [optimizeOpen, setOptimizeOpen]         = useState(false)
+  const [techOpen, setTechOpen]                 = useState(false)
 
-  // Simulation panel: collapsed by default, opened with play button
-  const [simOpen, setSimOpen] = useState(false)
-  const [simScenario, setSimScenario] = useState('DEMO')
+  // ── Impact data (from backend) ────────────────────────────────────────────
+  const [impactByDevice, setImpactByDevice] = useState<DeviceImpact[]>([])
+  const [impactTotal, setImpactTotal]       = useState<SavingsTotals>({
+    energy_saved_kwh: 0, cost_saved_eur: 0, co2_saved_kg: 0,
+  })
 
-  // Stats panel: toggled independently
-  const [statsOpen, setStatsOpen] = useState(false)
+  // ── Schedule (synced with backend) ────────────────────────────────────────
+  const [roomEvents, setRoomEvents]       = useState<RoomEvent[]>([])
+  const [energyWindows, setEnergyWindows] = useState<EnergyWindow[]>([])
 
-  // Backend live data
-  const { rooms: backendRooms, connected: backendConnected, scenarios } = useBackendStatus()
+  // ── Optimization ──────────────────────────────────────────────────────────
+  const [optimizeSuggestion, setOptimizeSuggestion] = useState<OptimizeSuggestion | null>(null)
+  const [optimizeLoading, setOptimizeLoading]       = useState(false)
 
-  // Auto-select the first room when backend connects
-  const mainBackendRoom = useMemo(
-    () => backendRooms.find((r) => r.heatPumps.length > 0) ?? null,
-    [backendRooms],
-  )
+  // ── Technician / anomaly ──────────────────────────────────────────────────
+  const [anomalyAlerts, setAnomalyAlerts]     = useState<Alert[]>([])
+  const [notifications, setNotifications]     = useState<Notification[]>([])
 
   const simulation = useFailureSimulation()
+  const currentDevices = simulation.devices
+  const currentRooms   = simulation.rooms
 
-  const currentDevices = isLiveMode && liveData.devices.length > 0
-    ? liveData.devices
-    : simulation.devices
+  // ── Initial data fetch ────────────────────────────────────────────────────
+  useEffect(() => {
+    fetchImpactByDevice().then(setImpactByDevice).catch(console.error)
+    fetchImpactSummary().then((s) => setImpactTotal(s.total)).catch(console.error)
 
-  const currentRooms = simulation.rooms
+    // Load schedule from backend (replaces mockCampus roomEvents)
+    fetchSchedule()
+      .then(setRoomEvents)
+      .catch(() => setRoomEvents([]))  // degrade to empty if backend down
 
+    // Load energy windows
+    fetchEnergyWindows().then(setEnergyWindows).catch(console.error)
+
+    // Load anomaly alerts (heating window has more data for demo)
+    fetchAnomalyAlerts('heating').then(setAnomalyAlerts).catch(console.error)
+
+    // Load existing notification log
+    fetchNotifications().then(setNotifications).catch(console.error)
+  }, [])
+
+  // ── Simulation auto-selects devices ──────────────────────────────────────
   useEffect(() => {
     if (
       simulation.status.phase === 'idle' ||
       simulation.status.phase === 'normal' ||
       simulation.status.phase === 'occupancy-adaptation'
-    ) {
-      return
-    }
+    ) return
     if (simulation.status.targetDeviceId) {
       setSelectedDeviceId(simulation.status.targetDeviceId)
+      setSelectedRoomId(null)
     }
   }, [simulation.status.phase, simulation.status.targetDeviceId])
 
-  // Close stats panel if backend disconnects
-  useEffect(() => {
-    if (!backendConnected) setStatsOpen(false)
-  }, [backendConnected])
+  // ── Selection handlers ────────────────────────────────────────────────────
+  const handleSelectDevice = (id: string) => {
+    setSelectedDeviceId(id); setSelectedRoomId(null); setPokesOpen(false)
+  }
+  const handleSelectRoom = (id: string) => {
+    setSelectedRoomId(id); setSelectedDeviceId(null); setPokesOpen(false)
+  }
+  const handleClearSelection = () => {
+    setSelectedDeviceId(null); setSelectedRoomId(null)
+  }
+  const handleReset = () => { handleClearSelection(); simulation.reset() }
 
-  const handleReset = () => {
-    setSelectedDeviceId(null)
-    simulation.reset()
+  // ── Event management (synced to backend) ─────────────────────────────────
+  const handleAddEvent = useCallback(async (event: RoomEvent) => {
+    // Optimistic update
+    setRoomEvents((prev) => [...prev, event])
+    try {
+      const saved = await createScheduleEvent(event)
+      // Replace optimistic entry with server-assigned id
+      setRoomEvents((prev) => prev.map((e) => (e.id === event.id ? saved : e)))
+      // Refresh energy windows after new event
+      fetchEnergyWindows().then(setEnergyWindows).catch(console.error)
+    } catch {
+      // Roll back if save fails
+      setRoomEvents((prev) => prev.filter((e) => e.id !== event.id))
+    }
+  }, [])
+
+  // ── Optimize schedule ─────────────────────────────────────────────────────
+  const handleOpenOptimize = async () => {
+    setOptimizeOpen(true)
+    setOptimizeLoading(true)
+    try {
+      const s = await fetchOptimizeSuggestion()
+      setOptimizeSuggestion(s)
+    } catch {
+      setOptimizeSuggestion(null)
+    } finally {
+      setOptimizeLoading(false)
+    }
   }
 
-  // Status colour for the stats toggle button
-  const statsStatusColor = (() => {
-    if (!mainBackendRoom) return '#4fc3f7'
-    const rank: Record<string, number> = { error: 3, warning: 2, active: 1, idle: 0 }
-    const worst = mainBackendRoom.heatPumps.reduce(
-      (w, hp) => rank[hp.status] > rank[w] ? hp.status : w, 'idle'
+  const handleAcceptOptimize = async (suggestion: OptimizeSuggestion) => {
+    await applyOptimization(suggestion)
+    // Reflect the move locally
+    setRoomEvents((prev) =>
+      prev.map((e) =>
+        e.id === suggestion.moveEventId ? { ...e, roomId: suggestion.toRoomId } : e
+      )
     )
-    return worst === 'error' ? '#ef5350' : worst === 'warning' ? '#ffa726' : worst === 'active' ? '#00e676' : '#4fc3f7'
-  })()
+    setOptimizeOpen(false)
+    setOptimizeSuggestion(null)
+    // Refresh energy windows
+    fetchEnergyWindows().then(setEnergyWindows).catch(console.error)
+  }
+
+  const handleRejectOptimize = () => {
+    setOptimizeOpen(false); setOptimizeSuggestion(null)
+  }
+
+  // ── Technician contact ────────────────────────────────────────────────────
+  const handleContactTechnician = async (alert: Alert) => {
+    const notification = await contactTechnician(alert)
+    setNotifications((prev) => [...prev, notification])
+  }
+
+  // ── Derived values ────────────────────────────────────────────────────────
+  const roomSavings: SavingsTotals = impactByDevice.length
+    ? impactByDevice.reduce(
+        (acc, d) => ({
+          energy_saved_kwh: acc.energy_saved_kwh + d.energy_saved_kwh,
+          cost_saved_eur:   acc.cost_saved_eur   + d.cost_saved_eur,
+          co2_saved_kg:     acc.co2_saved_kg     + d.co2_saved_kg,
+        }),
+        { energy_saved_kwh: 0, cost_saved_eur: 0, co2_saved_kg: 0 },
+      )
+    : impactTotal
+
+  const selectedRoom = selectedRoomId
+    ? currentRooms.find((r) => r.id === selectedRoomId) ?? null
+    : null
+
+  const roomEnergyWindows = selectedRoom
+    ? energyWindows.filter((w) => w.roomId === selectedRoom.id)
+    : []
+
+  // Critical alert count for technician badge
+  const criticalAlertCount = anomalyAlerts.filter(
+    (a) => a.severity === 'critical' || a.severity === 'warning'
+  ).length
 
   return (
     <div className="app-shell">
-      <TopBar />
-
-      {/* Toolbar */}
-      <div style={{
-        padding: '7px 16px', display: 'flex', gap: '12px', alignItems: 'center',
-        background: 'rgba(0,0,0,0.22)', borderBottom: '1px solid rgba(255,255,255,0.08)',
-        flexWrap: 'wrap',
-      }}>
-        <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', fontSize: '13px' }}>
-          <input
-            type="checkbox"
-            checked={isLiveMode}
-            onChange={(e) => setIsLiveMode(e.target.checked)}
-          />
-          Live Data Mode {liveData.isLoading && isLiveMode ? '(Loading…)' : ''}
-        </label>
-
-        {isLiveMode && liveData.error && (
-          <span style={{ color: '#ff6b6b', fontSize: '12px' }}>
-            Error connecting to simulation API
-          </span>
-        )}
-
-        {backendConnected && (
-          <span style={{
-            marginLeft: 'auto', fontSize: 10, color: '#00e676',
-            display: 'flex', alignItems: 'center', gap: 4,
-          }}>
-            <span style={{
-              width: 6, height: 6, borderRadius: '50%', background: '#00e676',
-              boxShadow: '0 0 6px #00e676', display: 'inline-block',
-            }} />
-            Backend connected
-          </span>
-        )}
-      </div>
+      <TopBar
+        onBadgesClick={() => setPokesOpen((v) => !v)}
+        onOptimizeClick={handleOpenOptimize}
+        onTechnicianClick={() => setTechOpen((v) => !v)}
+        alertCount={criticalAlertCount}
+      />
 
       <main className="map-stage">
         <CampusCanvas
           rooms={currentRooms}
           devices={currentDevices}
           activeFloor="all"
-          selectedDeviceId={selectedDeviceId}
-          onSelectDevice={setSelectedDeviceId}
-          onCloseDevice={() => setSelectedDeviceId(null)}
+          onSelectDevice={handleSelectDevice}
+          onSelectRoom={handleSelectRoom}
         />
 
-        {/* Room condition legend */}
-        <section className="map-legend glass-panel">
-          <span className="section-eyebrow">Room condition</span>
-          <div className="legend-list">
-            {legendStatuses.map((status) => (
-              <div className="legend-item" key={status}>
-                <span
-                  className="legend-swatch"
-                  style={{
-                    background: STATUS_COLORS[status],
-                    boxShadow: `0 0 12px ${STATUS_COLORS[status]}66`,
-                  }}
-                />
-                {STATUS_LABELS[status]}
-              </div>
-            ))}
-          </div>
-        </section>
+        {!selectedRoom && (
+          <section className="map-legend glass-panel">
+            <span className="section-eyebrow">Room condition</span>
+            <div className="legend-list">
+              {legendStatuses.map((status) => (
+                <div className="legend-item" key={status}>
+                  <span
+                    className="legend-swatch"
+                    style={{
+                      background: STATUS_COLORS[status],
+                      boxShadow: `0 0 12px ${STATUS_COLORS[status]}66`,
+                    }}
+                  />
+                  {STATUS_LABELS[status]}
+                </div>
+              ))}
+            </div>
+          </section>
+        )}
 
-        {/* Simulation: play button when closed, full panel when open */}
+        {selectedRoom && (
+          <RoomDetailsPanel
+            room={selectedRoom}
+            events={roomEvents}
+            savings={roomSavings}
+            energyWindows={roomEnergyWindows}
+            onClose={handleClearSelection}
+            onAddEvent={handleAddEvent}
+          />
+        )}
+
+        {pokesOpen && (
+          <PokesPanel totals={impactTotal} onClose={() => setPokesOpen(false)} />
+        )}
+
+        {optimizeOpen && (
+          <OptimizeModal
+            suggestion={optimizeSuggestion}
+            loading={optimizeLoading}
+            onAccept={handleAcceptOptimize}
+            onReject={handleRejectOptimize}
+            onClose={handleRejectOptimize}
+          />
+        )}
+
+        {techOpen && (
+          <TechnicianPanel
+            alerts={anomalyAlerts}
+            notifications={notifications}
+            onContactTechnician={handleContactTechnician}
+            onClose={() => setTechOpen(false)}
+          />
+        )}
+
         {simOpen ? (
           <FailureSimulationPanel
             status={simulation.status}
             onStepToNextPhase={simulation.stepToNextPhase}
             onReset={handleReset}
             onDismiss={() => setSimOpen(false)}
-            scenarios={scenarios}
-            selectedScenario={simScenario}
-            onSelectScenario={setSimScenario}
           />
         ) : (
           <button
@@ -185,8 +282,7 @@ function App() {
               background: 'rgba(8,15,32,0.88)',
               color: '#38bdf8', fontSize: 12, fontWeight: 600,
               cursor: 'pointer', backdropFilter: 'blur(10px)',
-              transition: 'all 0.15s',
-              boxShadow: '0 4px 16px rgba(0,0,0,0.4)',
+              transition: 'all 0.15s', boxShadow: '0 4px 16px rgba(0,0,0,0.4)',
             }}
           >
             <span style={{
@@ -200,76 +296,19 @@ function App() {
           </button>
         )}
 
-        <div className="scene-instructions">
-          <span>Drag</span> rotate
-          <span>Scroll</span> zoom
-          <span>Shift + drag</span> pan
-          <span>Tap a device</span> inspect
-        </div>
-
-        {/* Stats toggle button — bottom right, only when backend is connected */}
-        {backendConnected && mainBackendRoom && (
-          <button
-            type="button"
-            onClick={() => setStatsOpen((o) => !o)}
-            style={{
-              position: 'absolute', bottom: 112, right: 18,
-              display: 'flex', alignItems: 'center', gap: 7,
-              padding: '8px 14px', borderRadius: 8,
-              border: `1px solid ${statsOpen ? statsStatusColor : 'rgba(79,195,247,0.28)'}`,
-              background: statsOpen ? `${statsStatusColor}14` : 'rgba(8,15,32,0.88)',
-              color: statsOpen ? statsStatusColor : '#4fc3f7',
-              fontSize: 12, fontWeight: 600, cursor: 'pointer',
-              backdropFilter: 'blur(10px)', transition: 'all 0.15s',
-              boxShadow: '0 4px 16px rgba(0,0,0,0.4)',
-            }}
-          >
-            <span style={{
-              width: 6, height: 6, borderRadius: '50%',
-              background: statsStatusColor, display: 'inline-block',
-              boxShadow: statsOpen ? `0 0 6px ${statsStatusColor}` : 'none',
-            }} />
-            {mainBackendRoom.name}
-            <span style={{ opacity: 0.6, fontSize: 10 }}>
-              {statsOpen ? '✕' : '▸ stats'}
-            </span>
-          </button>
-        )}
-
-        {/* Stats panel overlay */}
-        {statsOpen && mainBackendRoom && (
-          <div className="udp-overlay">
-            <UnitDetailPanel
-              key={mainBackendRoom.id}
-              room={mainBackendRoom}
-              onClose={() => setStatsOpen(false)}
-            />
-          </div>
-        )}
-
-        {/* Sidebar — only when stats panel is closed */}
-        {!statsOpen && (
-          <CampusSidebar
-            rooms={currentRooms}
-            devices={currentDevices}
-            selectedDeviceId={selectedDeviceId}
-            buildingTelemetry={simulation.buildingTelemetry}
-            weatherForecast={
-              isLiveMode && liveData.weatherForecast.length > 0
-                ? liveData.weatherForecast
-                : mockWeatherForecast
-            }
-            roomEvents={
-              isLiveMode && liveData.roomEvents.length > 0
-                ? liveData.roomEvents
-                : mockRoomEvents
-            }
-            controlDecisions={simulation.controlDecisions}
-            roomLoadHeatmap={roomLoadHeatmap}
-            onSelectDevice={setSelectedDeviceId}
-            onClearSelection={() => setSelectedDeviceId(null)}
-          />
-        )}
+        <CampusSidebar
+          rooms={currentRooms}
+          devices={currentDevices}
+          selectedDeviceId={selectedDeviceId}
+          buildingTelemetry={simulation.buildingTelemetry}
+          weatherForecast={mockWeatherForecast}
+          roomEvents={roomEvents}
+          controlDecisions={simulation.controlDecisions}
+          roomLoadHeatmap={roomLoadHeatmap}
+          impactByDevice={impactByDevice}
+          onSelectDevice={handleSelectDevice}
+          onClearSelection={handleClearSelection}
+        />
 
         <ControlTimeline actions={plannedActions} />
       </main>

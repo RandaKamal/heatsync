@@ -74,13 +74,17 @@ function createRuntimeHeatmap(
   )
 }
 
+// Room dimensions match the backend space (space_id 3dbed10b-…).
+// Building footprint derived from device positions in backend/control/controller.py:
+// devices span x=±12 m (east-west), y=±8 m (north-south), z=3 m (roof height).
+// Single lecture hall: 24 m wide × 16 m deep × 3.5 m tall.
 export const rooms: Room[] = [
   {
     id: 'G01',
-    name: 'Main Space',
+    name: 'Lecture Hall',
     floor: 0,
-    position: [0, 0.8, -0.6],
-    size: [10.8, 1.3, 4.6],
+    position: [0, 1.75, 0],
+    size: [24, 3.5, 16],
     status: 'normal',
     currentTemperature: 21.1,
     targetTemperature: 21,
@@ -120,12 +124,18 @@ const HP_BASE = {
   ],
 }
 
+// Device positions derived from backend/control/controller.py DEVICE_POSITIONS.
+// Backend coords (x=east m, y=north m, z=height m) mapped to Three.js (x, z+0.525, -y):
+//   Wing A  (-12,  8, 3) → Three.js (-12, 4.0, -8)   NW roof corner
+//   Wing B  ( 12,  8, 3) → Three.js ( 12, 4.0, -8)   NE roof corner
+//   Wing C  (-12, -8, 3) → Three.js (-12, 4.0,  8)   SW roof corner
+//   MainHall( 12, -8, 3) → Three.js ( 12, 4.0,  8)   SE roof corner
 export const climateDevices: ClimateDevice[] = [
   {
     ...HP_BASE,
     id: 'ORION-01',
-    name: 'HP-1 (ORIO 025)',
-    position: [-4.5, 0.72, -1.5],
+    name: 'HP-1 · Wing A',
+    position: [-12, 4.0, -8],
     status: 'normal',
     currentPowerKw: 5.8,
     energyTodayKwh: 21.8,
@@ -152,8 +162,8 @@ export const climateDevices: ClimateDevice[] = [
   {
     ...HP_BASE,
     id: 'ORION-02',
-    name: 'HP-2 (ORIO 025)',
-    position: [-1.5, 0.72, -1.5],
+    name: 'HP-2 · Wing B',
+    position: [12, 4.0, -8],
     status: 'at-risk',
     currentPowerKw: 6.4,
     energyTodayKwh: 24.6,
@@ -181,8 +191,8 @@ export const climateDevices: ClimateDevice[] = [
   {
     ...HP_BASE,
     id: 'HP-3',
-    name: 'HP-3 (ORIO 025)',
-    position: [1.5, 0.72, -1.5],
+    name: 'HP-3 · Wing C',
+    position: [-12, 4.0, 8],
     status: 'normal',
     currentPowerKw: 5.6,
     energyTodayKwh: 20.1,
@@ -208,8 +218,8 @@ export const climateDevices: ClimateDevice[] = [
   {
     ...HP_BASE,
     id: 'HP-4',
-    name: 'HP-4 (ORIO 025)',
-    position: [4.5, 0.72, -1.5],
+    name: 'HP-4 · Main Hall',
+    position: [12, 4.0, 8],
     status: 'normal',
     currentPowerKw: 5.5,
     energyTodayKwh: 19.8,

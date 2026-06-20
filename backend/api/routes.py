@@ -11,6 +11,8 @@ from flask import Blueprint, Response, jsonify, request
 from prediction import predictor
 
 from api.weather import DEFAULT_LAT, DEFAULT_LON, fetch_current, fetch_forecast
+from schedule import manager as schedule_manager
+from optimization import optimizer
 
 api_bp = Blueprint("api", __name__, url_prefix="/api")
 
@@ -889,3 +891,210 @@ def frontend_status():
             "alerts":      alert_count,
         },
     })
+
+
+# ── Schedule management ───────────────────────────────────────────────────────
+
+@api_bp.get("/schedules")
+def get_schedules():
+    """Return all stored events, optionally filtered by roomId."""
+    room_id = request.args.get("roomId")
+    events = schedule_manager.list_events(room_id)
+    return jsonify(events)
+
+
+@api_bp.post("/schedules")
+def create_schedule_event():
+    """
+    Create a new room event.
+    Body: { roomId, title, start (HH:MM), end (HH:MM),
+            expectedStudents?, day?, recurrence? }
+    """
+    body = request.get_json(silent=True) or {}
+    required = {"roomId", "title", "start", "end"}
+    missing = required - body.keys()
+    if missing:
+        return _err(f"Missing fields: {', '.join(sorted(missing))}")
+    try:
+        event = schedule_manager.add_event(
+            room_id=body["roomId"],
+            title=body["title"],
+            start=body["start"],
+            end=body["end"],
+            expected_students=int(body.get("expectedStudents", 50)),
+            day=body.get("day"),
+            recurrence=body.get("recurrence", "once"),
+        )
+        return jsonify(event), 201
+    except ValueError as e:
+        return _err(str(e))
+
+
+@api_bp.delete("/schedules/<event_id>")
+def delete_schedule_event(event_id: str):
+    """Delete an event by id."""
+    if schedule_manager.delete_event(event_id):
+        return jsonify({"ok": True})
+    return _err(f"Event '{event_id}' not found", 404)
+
+
+@api_bp.patch("/schedules/<event_id>")
+def patch_schedule_event(event_id: str):
+    """Partially update an event (e.g. roomId after optimization apply)."""
+    body = request.get_json(silent=True) or {}
+    updated = schedule_manager.update_event(event_id, **body)
+    if updated:
+        return jsonify(updated)
+    return _err(f"Event '{event_id}' not found", 404)
+
+
+@api_bp.get("/schedules/energy-windows")
+def schedule_energy_windows():
+    """
+    For each stored event return:
+      preheatStart   – when to turn on heat pump (HH:MM)
+      eventStart     – lecture start
+      eventEnd       – lecture end
+      windDownTime   – when setpoint drops back to unoccupied level (HH:MM)
+      leadMinutes    – computed preheat lead time
+      predictedMode  – HEAT / COOL / AUTO
+      setpointCelsius
+
+    Pre-heat: based on outdoor temp + comfort_setpoint formula.
+    Wind-down: eventEnd + WIND_DOWN_BUFFER_MINUTES (default 15 min).
+    """
+    lat = float(request.args.get("lat", DEFAULT_LAT))
+    lon = float(request.args.get("lon", DEFAULT_LON))
+    windows = schedule_manager.compute_energy_windows(lat=lat, lon=lon)
+    return jsonify({
+        "windows": windows,
+        "windDownBufferMinutes": schedule_manager.WIND_DOWN_BUFFER_MINUTES,
+        "note": (
+            "preheatStart: turn on heat pump this early. "
+            "windDownTime: drop to unoccupied setpoint after this time. "
+            "Tune WIND_DOWN_BUFFER_MINUTES in schedule/manager.py."
+        ),
+    })
+
+
+# ── Schedule optimization ─────────────────────────────────────────────────────
+
+@api_bp.get("/optimization/suggest")
+def optimization_suggest():
+    """
+    Analyze current schedule and return a consolidation suggestion.
+    Finds two events in different rooms with overlapping times where
+    combined attendance fits in one room, yielding energy savings.
+
+    Returns { suggestion: {...} | null }.
+    """
+    events = schedule_manager.list_events()
+    suggestion = optimizer.suggest_consolidation(events)
+    return jsonify({"suggestion": suggestion})
+
+
+@api_bp.post("/optimization/apply")
+def optimization_apply():
+    """
+    Apply an accepted consolidation suggestion.
+    Body: { moveEventId, toRoomId }
+
+    Updates the event's roomId in the schedule store.
+    """
+    body = request.get_json(silent=True) or {}
+    event_id = body.get("moveEventId")
+    to_room   = body.get("toRoomId")
+    if not event_id or not to_room:
+        return _err("'moveEventId' and 'toRoomId' are required")
+
+    updated = schedule_manager.update_event(event_id, roomId=to_room)
+    if not updated:
+        return _err(f"Event '{event_id}' not found", 404)
+    return jsonify({"ok": True, "updatedEvent": updated})
+
+
+# ── Enhanced technician contact ───────────────────────────────────────────────
+
+@api_bp.post("/anomaly/contact-technician")
+def contact_technician():
+    """
+    Log a rich technician notification that bundles:
+    - alert info (severity, type, message)
+    - latest sensor readings for the affected device
+    - parsed error register descriptions
+    - recommended diagnostic steps
+
+    In production: integrate with PagerDuty / Twilio / SMTP here.
+    Extension point: replace the log append with an HTTP call to your
+    notification provider and store the delivery receipt.
+    """
+    body = request.get_json(silent=True) or {}
+    device_id = body.get("deviceId", "")
+    alert_type = body.get("alertType", "")
+    severity   = body.get("severity", "warning")
+    message    = body.get("message", "")
+
+    # Fetch latest snapshot for diagnostic context
+    diagnostics: dict = {}
+    try:
+        snap_df = loader.snapshots("cooling")
+        dev_snaps = snap_df[snap_df["device_id"] == device_id]
+        if not dev_snaps.empty:
+            latest = dev_snaps.iloc[-1].to_dict()
+            diagnostics = {
+                "roomTemp":    latest.get("status_temperature_in_celsius"),
+                "supplyTemp":  latest.get("status_temperature_supply_in_celsius"),
+                "returnTemp":  latest.get("status_temperature_return_in_celsius"),
+                "outsideTemp": latest.get("status_temperature_outside_in_celsius"),
+                "humidity":    latest.get("status_humidity_in_percent"),
+                "co2Ppm":      latest.get("status_carbon_dioxide_in_ppm"),
+                "lowPressure": latest.get("status_low_pressure_in_bar"),
+                "highPressure":latest.get("status_high_pressure_in_bar"),
+                "errorRegs":   latest.get("status_error_registers"),
+                "alarmActive": latest.get("status_is_alarm_active"),
+                "compressor":  latest.get("status_is_compressor_active"),
+            }
+    except Exception:
+        pass
+
+    # Compile suggested diagnostic steps based on alert type
+    diagnostic_steps: list[str] = []
+    at = alert_type.upper()
+    if "PRESSURE" in at:
+        diagnostic_steps += [
+            "Check refrigerant charge level.",
+            "Inspect expansion valve and filter.",
+            "Verify that outdoor coil is not iced over.",
+        ]
+    if "SUPPLY_RETURN" in at:
+        diagnostic_steps += [
+            "Check compressor operation — if supply ≈ return, compressor may not be running.",
+            "Inspect duct connections for disconnection or blockage.",
+        ]
+    if "ERROR_REGISTER" in at or "ALARM" in at:
+        diagnostic_steps += [
+            "Read full alarm register via Modbus (registers 1901-1904).",
+            "Check display panel on unit for active fault code.",
+        ]
+    if not diagnostic_steps:
+        diagnostic_steps = ["Inspect unit visually and check fault log on display."]
+
+    entry = {
+        "id":               len(_notification_log) + 1,
+        "timestamp":        datetime.now(timezone.utc).isoformat(),
+        "deviceId":         device_id,
+        "unitId":           body.get("unitId", device_id),
+        "roomName":         body.get("roomName", "Main Space"),
+        "severity":         severity,
+        "alertType":        alert_type,
+        "message":          message,
+        "diagnostics":      diagnostics,
+        "diagnosticSteps":  diagnostic_steps,
+        "status":           "logged",
+        "note": (
+            "In production: POST to PagerDuty/Twilio/SMTP with this payload. "
+            "The 'diagnostics' field contains the last known sensor readings."
+        ),
+    }
+    _notification_log.append(entry)
+    return jsonify({"ok": True, "notification": entry, "totalSent": len(_notification_log)})

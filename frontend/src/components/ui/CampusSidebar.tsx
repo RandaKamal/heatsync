@@ -14,6 +14,7 @@ import type {
   RoomLoadHeatmapCell,
   WeatherForecastPoint,
 } from '../../types/campus'
+import type { DeviceImpact } from '../../api/client'
 import {
   MODE_LABELS,
   STATUS_COLORS,
@@ -31,6 +32,7 @@ interface CampusSidebarProps {
   roomEvents: RoomEvent[]
   controlDecisions: ControlDecision[]
   roomLoadHeatmap: RoomLoadHeatmapCell[]
+  impactByDevice: DeviceImpact[]
   onSelectDevice: (deviceId: string) => void
   onClearSelection: () => void
 }
@@ -56,6 +58,7 @@ export function CampusSidebar({
   roomEvents,
   controlDecisions,
   roomLoadHeatmap,
+  impactByDevice,
   onSelectDevice,
   onClearSelection,
 }: CampusSidebarProps) {
@@ -65,11 +68,14 @@ export function CampusSidebar({
     ) ?? null
 
   if (selectedDevice) {
-    const statusColor =
-      STATUS_COLORS[selectedDevice.status]
+    const statusColor = STATUS_COLORS[selectedDevice.status]
     const servedRooms = rooms.filter((room) =>
       selectedDevice.servedRoomIds.includes(room.id),
     )
+    // Match backend device UUID by name ("Device 1" → find in impactByDevice)
+    const impact = impactByDevice.find(
+      (d) => d.device_name === selectedDevice.name || d.device_id === selectedDevice.id,
+    ) ?? impactByDevice[0] ?? null
 
     return (
       <aside className="analytics-sidebar glass-panel">
@@ -149,6 +155,31 @@ export function CampusSidebar({
             </article>
           </div>
         </section>
+
+        {impact && (
+          <section className="analytics-section">
+            <div className="analytics-section__heading">
+              <div>
+                <span className="section-eyebrow">Cumulative savings</span>
+                <h3>Energy · Cost · CO₂</h3>
+              </div>
+            </div>
+            <div className="metric-grid metric-grid--four" style={{ gridTemplateColumns: '1fr 1fr 1fr' }}>
+              <article className="analytics-metric">
+                <span>Energy saved</span>
+                <strong>{impact.energy_saved_kwh.toFixed(0)}<small> kWh</small></strong>
+              </article>
+              <article className="analytics-metric">
+                <span>Cost saved</span>
+                <strong>€{impact.cost_saved_eur.toFixed(0)}</strong>
+              </article>
+              <article className="analytics-metric">
+                <span>CO₂ avoided</span>
+                <strong>{impact.co2_saved_kg.toFixed(0)}<small> kg</small></strong>
+              </article>
+            </div>
+          </section>
+        )}
 
         <section className="analytics-section">
           <div className="analytics-section__heading">
