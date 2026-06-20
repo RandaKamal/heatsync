@@ -29,4 +29,3 @@ See `.gsd/REQUIREMENTS.md` for the explicit capability contract, requirement sta
 
 ## Milestone Sequence
 
-- [ ] M001: HeatSync Modeling and Controls Notebooks — Build a comprehensive suite of notebooks demonstrating modeling, anomaly detection, and optimization.
