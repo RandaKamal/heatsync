@@ -6,6 +6,7 @@ import pytest
 from notebooks.utils import (
     align_to_15min,
     build_aligned_dataset,
+    build_room_physical_model_frame,
     load_intervals,
     load_power_draw,
     load_processed,
@@ -254,3 +255,41 @@ def test_window_validation_rejects_unknown_window(loader: Callable[[str], object
 def test_load_processed_raises_for_missing_cache(tmp_path: pathlib.Path) -> None:
     with pytest.raises(FileNotFoundError, match="Processed file not found"):
         load_processed("heating", output_dir=str(tmp_path))
+
+
+def test_build_room_physical_model_frame_aggregates_device_power() -> None:
+    timestamps = pd.to_datetime(
+        [
+            "2026-03-30 00:00:00",
+            "2026-03-30 00:00:00",
+            "2026-03-30 00:15:00",
+            "2026-03-30 00:15:00",
+        ]
+    )
+    df = pd.DataFrame(
+        {
+            "device_id": ["dev_1", "dev_2", "dev_1", "dev_2"],
+            "status_temperature_in_celsius": [20.0, 22.0, 21.0, 23.0],
+            "outside_temperature": [5.0, 7.0, 6.0, 8.0],
+            "power_draw_kw": [1.0, 2.0, 3.0, 4.0],
+            "target_temp": [21.0, 21.0, 22.0, 22.0],
+            "occupancy_flag": [0, 1, 0, 0],
+            "is_heating_required": [1, 0, 1, 1],
+            "status_is_compressor_active": [0, 1, 1, 1],
+            "hour_of_day": [0, 0, 0, 0],
+            "is_weekend": [0, 0, 0, 0],
+        },
+        index=timestamps,
+    )
+    df.index.name = "timestamp"
+
+    room_df = build_room_physical_model_frame(df, dt_seconds=900.0, cop=2.0)
+
+    assert list(room_df["device_count"]) == [2, 2]
+    assert list(room_df["T_in"]) == [21.0, 22.0]
+    assert list(room_df["T_out"]) == [6.0, 7.0]
+    assert list(room_df["Q_electric_kw"]) == [3.0, 7.0]
+    assert list(room_df["Q_heat_kw"]) == [6.0, 14.0]
+    assert list(room_df["electricity_kwh"]) == [0.75, 1.75]
+    assert list(room_df["cumulative_electricity_kwh"]) == [0.75, 2.5]
+    assert list(room_df["occupancy_flag"]) == [1, 0]

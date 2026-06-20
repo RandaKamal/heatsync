@@ -89,6 +89,7 @@ SPACE_EVENTS_OPTIONAL: list[str] = ["name", "type", "source"]
 MAX_INTERPOLATION_GAP = 2
 WEEKEND_START_DAY = 5
 THRESHOLD_REQUIRED = 0.5
+SECONDS_PER_HOUR = 3_600.0
 
 
 def validate_columns(df: pd.DataFrame, file_type: str, file_path: str) -> None:
@@ -406,3 +407,70 @@ def load_processed(window: str, output_dir: str = "backend/data/processed") -> p
     df["timestamp"] = pd.to_datetime(df["timestamp"])
     df.set_index("timestamp", inplace=True)
     return df
+
+
+def build_room_physical_model_frame(
+    df: pd.DataFrame,
+    *,
+    dt_seconds: float = 900.0,
+    cop: float = 1.0,
+) -> pd.DataFrame:
+    """
+    Aggregate per-device processed rows into one room-level physical-model frame.
+
+    The thermal state is room-level, while processed rows are per device. This helper
+    keeps observed temperature and outdoor telemetry as device means, sums electrical
+    power across all devices, and derives interval/cumulative electricity use.
+    """
+    if dt_seconds <= 0.0:
+        raise ValueError("dt_seconds must be positive.")
+    if cop <= 0.0:
+        raise ValueError("cop must be positive.")
+
+    required_cols = [
+        "device_id",
+        "status_temperature_in_celsius",
+        "outside_temperature",
+        "power_draw_kw",
+    ]
+    missing_cols = [col for col in required_cols if col not in df.columns]
+    if missing_cols:
+        raise ValueError(f"Processed physical model data is missing columns: {missing_cols}")
+    if not isinstance(df.index, pd.DatetimeIndex):
+        raise ValueError("Processed physical model data must be indexed by timestamp.")
+
+    grouped = df.sort_index().groupby(level=0, sort=True)
+    room_df = pd.DataFrame(index=grouped.size().index)
+    room_df.index.name = df.index.name or "timestamp"
+
+    room_df["T_in"] = grouped["status_temperature_in_celsius"].mean()
+    room_df["T_out"] = grouped["outside_temperature"].mean()
+    room_df["Q_electric_kw"] = grouped["power_draw_kw"].sum()
+    room_df["device_count"] = grouped["device_id"].nunique()
+
+    optional_aggregations = {
+        "target_temp": "mean",
+        "occupancy_flag": "max",
+        "is_heating_required": "max",
+        "is_cooling_required": "max",
+        "status_is_compressor_active": "max",
+        "status_is_defrost_active": "max",
+        "hour_of_day": "first",
+        "day_of_week": "first",
+        "is_weekend": "first",
+    }
+    for col, agg in optional_aggregations.items():
+        if col in df.columns:
+            if agg == "mean":
+                room_df[col] = grouped[col].mean()
+            elif agg == "max":
+                room_df[col] = grouped[col].max()
+            else:
+                room_df[col] = grouped[col].first()
+
+    dt_hours = dt_seconds / SECONDS_PER_HOUR
+    room_df["Q_heat_kw"] = room_df["Q_electric_kw"] * cop
+    room_df["electricity_kwh"] = room_df["Q_electric_kw"] * dt_hours
+    room_df["cumulative_electricity_kwh"] = room_df["electricity_kwh"].cumsum()
+
+    return room_df.dropna(subset=["T_in", "T_out", "Q_electric_kw", "Q_heat_kw"])
