@@ -1,4 +1,4 @@
-# M001: HeatSync Modeling and Controls Notebooks
+# M001: M001: M001: M001: HeatSync Modeling and Controls Notebooks
 
 **Vision:** Create a comprehensive set of Jupyter notebooks under backend/notebooks/ with a shared helper module backend/notebooks/utils.py illustrating data preprocessing, forecasting, grey-box/PINN modeling, anomaly detection, and energy controls on actual Heat Pump data.
 
@@ -36,4 +36,4 @@
 
 ## Boundary Map
 
-| Boundary | Produces | Consumes |\n|----------|----------|----------|\n| backend/data/ (raw CSVs) | — | S01 reads raw snap/interval/power files |\n| backend/notebooks/utils.py | Shared loading, alignment, feature functions | All notebooks S01-S06 |\n| backend/notebooks/01-06 | Model outputs, metrics, charts | utils.py, backend/data/ |\n| backend/tests/test_notebooks.py | Pass/fail test results | All 6 notebooks |
+## Boundary Map

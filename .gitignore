@@ -101,7 +101,6 @@ plots/
 mutants
 dummy_output
 .codex
-deep-research-report.md
 
 # pytype static type analyzer
 .pytype/
@@ -183,3 +182,4 @@ heatsync-failure-simulation-backup-*/
 tmp/
 temp/
 .cache/
+event_based_device_control_task.md
