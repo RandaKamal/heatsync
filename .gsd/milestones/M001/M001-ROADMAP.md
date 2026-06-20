@@ -22,13 +22,13 @@
 - [x] **S03: LSTM and Two-Level Forecasting Models** `risk:medium` `depends:[S01]`
   > After this: Runs 03_forecasting_lstm.ipynb showing PyTorch LSTM base predictions and L2 residual correction with metrics.
 
-- [ ] **S04: Physical Grey-Box and PINN Models** `[sketch]` `risk:high` `depends:[S01]`
+- [x] **S04: Physical Grey-Box and PINN Models** `risk:high` `depends:[S01]`
   > After this: Runs 04_physical_modeling.ipynb showing 2R2C calibration with positive R/C values and PINN training convergence.
 
-- [ ] **S05: Anomaly Detection Models** `[sketch]` `risk:medium` `depends:[S01]`
+- [x] **S05: Anomaly Detection Models** `risk:medium` `depends:[S01]`
   > After this: Runs 05_anomaly_detection.ipynb listing flagged anomaly timestamps from Isolation Forest, One-Class SVM, and Autoencoder.
 
-- [ ] **S06: Energy Controls and Savings Optimization** `[sketch]` `risk:medium` `depends:[S01,S04]`
+- [ ] **S06: Energy Controls and Savings Optimization** `risk:medium` `depends:[S01,S04]`
   > After this: Runs 06_energy_controls.ipynb showing occupancy heat gains, comfort setpoints, and estimated HVAC kWh savings from setback strategies.
 
 - [ ] **S07: Automated Notebook Suite Verification** `[sketch]` `risk:low` `depends:[S02,S03,S04,S05,S06]`

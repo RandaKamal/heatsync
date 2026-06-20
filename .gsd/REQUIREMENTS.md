@@ -13,15 +13,6 @@ This file is the explicit capability and coverage contract for the project.
 - Primary owning slice: M001-992333/S04
 - Validation: mapped
 
-### R005 — Implement Isolation Forest, One-Class SVM, and PyTorch autoencoder to identify sensor faults/alarms.
-- Class: core-capability
-- Status: active
-- Description: Implement Isolation Forest, One-Class SVM, and PyTorch autoencoder to identify sensor faults/alarms.
-- Why it matters: To detect anomalies and malfunctions in HVAC sensors and operations.
-- Source: user
-- Primary owning slice: M001-992333/S05
-- Validation: mapped
-
 ### R006 — Estimate heating/cooling power draw, calculate occupancy sensible/latent heat gains, and evaluate setpoint setbacks.
 - Class: core-capability
 - Status: active
@@ -71,6 +62,16 @@ This file is the explicit capability and coverage contract for the project.
 - Validation: Validated via end-to-end nbconvert programmatic execution of backend/notebooks/03_forecasting_lstm.ipynb producing base (L1) and residual-corrected (L2) evaluation metrics (RMSE, MAPE) and plots, alongside passing pytest suite on backend/tests/test_lstm.py.
 - Notes: Validated in S03: PyTorch LSTM L1 base model and L2 residual correction implemented and evaluated in backend/notebooks/03_forecasting_lstm.ipynb, producing finite positive RMSE and MAPE values for both heating and cooling periods. Verified by tests under backend/tests/test_lstm.py.
 
+### R005 — Implement Isolation Forest, One-Class SVM, and PyTorch autoencoder to identify sensor faults/alarms.
+- Class: core-capability
+- Status: validated
+- Description: Implement Isolation Forest, One-Class SVM, and PyTorch autoencoder to identify sensor faults/alarms.
+- Why it matters: To detect anomalies and malfunctions in HVAC sensors and operations.
+- Source: user
+- Primary owning slice: M001-992333/S05
+- Validation: Validated via end-to-end nbconvert execution of backend/notebooks/05_anomaly_detection.ipynb and passing pytest suite on backend/tests/test_anomaly.py.
+- Notes: Validated in S05: Implemented Isolation Forest, One-Class SVM, and PyTorch Autoencoder detectors in backend/notebooks/05_anomaly_detection.ipynb. Generated a ranked shortlist of anomaly candidates using a combined normalized score and vote count, integrated with Modbus error register alarm flags. Verified via pytest suite in backend/tests/test_anomaly.py covering all models and notebook programmatic execution.
+
 ## Deferred
 
 ## Out of Scope
@@ -83,13 +84,13 @@ This file is the explicit capability and coverage contract for the project.
 | R002 | core-capability | validated | M001-992333/S02 | none | Validated via end-to-end nbconvert programmatic execution of backend/notebooks/02_forecasting_sarimax.ipynb producing evaluation metrics (RMSE, MAPE) and plots, alongside passing pytest suite on backend/tests/test_sarimax.py. |
 | R003 | core-capability | validated | M001-992333/S03 | none | Validated via end-to-end nbconvert programmatic execution of backend/notebooks/03_forecasting_lstm.ipynb producing base (L1) and residual-corrected (L2) evaluation metrics (RMSE, MAPE) and plots, alongside passing pytest suite on backend/tests/test_lstm.py. |
 | R004 | core-capability | active | M001-992333/S04 | none | mapped |
-| R005 | core-capability | active | M001-992333/S05 | none | mapped |
+| R005 | core-capability | validated | M001-992333/S05 | none | Validated via end-to-end nbconvert execution of backend/notebooks/05_anomaly_detection.ipynb and passing pytest suite on backend/tests/test_anomaly.py. |
 | R006 | core-capability | active | M001-992333/S06 | none | mapped |
 | R007 | quality-attribute | active | M001-992333/S07 | none | mapped |
 
 ## Coverage Summary
 
-- Active requirements: 4
-- Mapped to slices: 4
-- Validated: 3 (R001, R002, R003)
+- Active requirements: 3
+- Mapped to slices: 3
+- Validated: 4 (R001, R002, R003, R005)
 - Unmapped active requirements: 0
