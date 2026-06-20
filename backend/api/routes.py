@@ -1,11 +1,11 @@
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import comfort.model as comfort
-import data.loader as loader
 import impact.calculator as impact
 import pandas as pd
 from anomaly import detector
 from control import controller
+from data import loader
 from flask import Blueprint, Response, jsonify, request
 from prediction import predictor
 
@@ -18,11 +18,13 @@ SPACE_ID = "3dbed10b-9e88-4163-916d-3182e2ecc69f"
 
 # ── helpers ──────────────────────────────────────────────────────────────────
 
+
 def _err(msg: str, code: int = 400) -> tuple[Response, int]:
     return jsonify({"error": msg}), code
 
 
 # ── health ────────────────────────────────────────────────────────────────────
+
 
 @api_bp.get("/health")
 def health() -> Response:
@@ -30,6 +32,7 @@ def health() -> Response:
 
 
 # ── weather ───────────────────────────────────────────────────────────────────
+
 
 @api_bp.get("/weather/forecast")
 def weather_forecast() -> Response:
@@ -49,6 +52,7 @@ def weather_current() -> Response:
 
 
 # ── devices ───────────────────────────────────────────────────────────────────
+
 
 @api_bp.get("/devices")
 def list_devices() -> Response:
@@ -106,6 +110,7 @@ def device_power(device_id: str) -> Response | tuple[Response, int]:
 
 # ── spaces / events ───────────────────────────────────────────────────────────
 
+
 @api_bp.get("/spaces/events")
 def space_events_all() -> Response:
     """All scheduled space events across both windows."""
@@ -119,6 +124,7 @@ def space_events_all() -> Response:
 
 
 # ── impact ────────────────────────────────────────────────────────────────────
+
 
 @api_bp.get("/impact/summary")
 def impact_summary() -> Response:
@@ -148,6 +154,7 @@ def impact_timeline() -> Response | tuple[Response, int]:
 
 
 # ── control ───────────────────────────────────────────────────────────────────
+
 
 @api_bp.get("/control/status")
 def control_status() -> Response:
@@ -233,6 +240,7 @@ def control_prediction() -> Response | tuple[Response, int]:
 
 # ── prediction ────────────────────────────────────────────────────────────────
 
+
 @api_bp.get("/prediction/schedule")
 def prediction_schedule() -> Response:
     """
@@ -253,6 +261,7 @@ def prediction_preheat() -> Response:
 
 
 # ── comfort ───────────────────────────────────────────────────────────────────
+
 
 @api_bp.get("/comfort/current")
 def comfort_current() -> Response:
@@ -291,15 +300,17 @@ def comfort_setpoint_for_month() -> Response:
     """
     month = int(request.args.get("month", datetime.now().month))
     occ = int(request.args.get("occupancy", 0))
-    return jsonify({
-        "month": month,
-        "occupancy": occ,
-        "clothing_insulation_clo": comfort.seasonal_clo(month),
-        "comfort_setpoint_celsius": comfort.comfort_setpoint(month, occ),
-        "mold_absolute_min_celsius": comfort.MOLD_ABSOLUTE_MIN_CELSIUS,
-        "mold_safe_min_celsius": comfort.MOLD_SAFE_MIN_CELSIUS,
-        "max_event_power_fraction": comfort.MAX_EVENT_POWER_FRACTION,
-    })
+    return jsonify(
+        {
+            "month": month,
+            "occupancy": occ,
+            "clothing_insulation_clo": comfort.seasonal_clo(month),
+            "comfort_setpoint_celsius": comfort.comfort_setpoint(month, occ),
+            "mold_absolute_min_celsius": comfort.MOLD_ABSOLUTE_MIN_CELSIUS,
+            "mold_safe_min_celsius": comfort.MOLD_SAFE_MIN_CELSIUS,
+            "max_event_power_fraction": comfort.MAX_EVENT_POWER_FRACTION,
+        }
+    )
 
 
 @api_bp.get("/comfort/holidays")
@@ -313,6 +324,7 @@ def comfort_holidays() -> Response:
 
 
 # ── anomaly ───────────────────────────────────────────────────────────────────
+
 
 @api_bp.get("/anomaly/alerts")
 def anomaly_alerts() -> Response | tuple[Response, int]:
@@ -347,14 +359,14 @@ def notify_technician() -> Response | tuple[Response, int]:
         return _err(f"Missing fields: {', '.join(missing)}")
 
     entry = {
-        "id":        len(_notification_log) + 1,
-        "timestamp": datetime.now(timezone.utc).isoformat(),
-        "roomName":  body["roomName"],
-        "unitId":    body["unitId"],
-        "deviceId":  body.get("deviceId", ""),
-        "severity":  body["severity"],
-        "message":   body["message"],
-        "status":    "sent",
+        "id": len(_notification_log) + 1,
+        "timestamp": datetime.now(UTC).isoformat(),
+        "roomName": body["roomName"],
+        "unitId": body["unitId"],
+        "deviceId": body.get("deviceId", ""),
+        "severity": body["severity"],
+        "message": body["message"],
+        "status": "sent",
     }
     _notification_log.append(entry)
     return jsonify({"ok": True, "notification": entry, "totalSent": len(_notification_log)})
@@ -370,23 +382,51 @@ def get_notifications() -> Response:
 
 # 3-D positions match the React building layout exactly
 _ROOM_MAP = [
-    {"id": "wing-a",    "name": "Wing A",    "device_id": "bdaf0e14-2cd1-43c8-b9ea-b3c90309f773",
-     "position": [-16, 2, -8], "size": [14, 4, 12], "hp_id": "HP-A1", "hp_pos": [-16, 5.1, -8]},
-    {"id": "wing-b",    "name": "Wing B",    "device_id": "1c893f75-4599-4402-9d4c-1017aa858fa8",
-     "position": [0, 2, -8],   "size": [14, 4, 12], "hp_id": "HP-B1", "hp_pos": [0, 5.1, -8]},
-    {"id": "wing-c",    "name": "Wing C",    "device_id": "e72fea56-abe7-4d3f-a0ed-1e6b6c462157",
-     "position": [16, 2, -8],  "size": [14, 4, 12], "hp_id": "HP-C1", "hp_pos": [16, 5.1, -8]},
-    {"id": "main-hall", "name": "Main Hall", "device_id": "930f3621-05df-4574-9270-9d994c5b716c",
-     "position": [-16, 2, 8],  "size": [14, 4, 12], "hp_id": "HP-D1", "hp_pos": [-16, 5.1, 8]},
+    {
+        "id": "wing-a",
+        "name": "Wing A",
+        "device_id": "bdaf0e14-2cd1-43c8-b9ea-b3c90309f773",
+        "position": [-16, 2, -8],
+        "size": [14, 4, 12],
+        "hp_id": "HP-A1",
+        "hp_pos": [-16, 5.1, -8],
+    },
+    {
+        "id": "wing-b",
+        "name": "Wing B",
+        "device_id": "1c893f75-4599-4402-9d4c-1017aa858fa8",
+        "position": [0, 2, -8],
+        "size": [14, 4, 12],
+        "hp_id": "HP-B1",
+        "hp_pos": [0, 5.1, -8],
+    },
+    {
+        "id": "wing-c",
+        "name": "Wing C",
+        "device_id": "e72fea56-abe7-4d3f-a0ed-1e6b6c462157",
+        "position": [16, 2, -8],
+        "size": [14, 4, 12],
+        "hp_id": "HP-C1",
+        "hp_pos": [16, 5.1, -8],
+    },
+    {
+        "id": "main-hall",
+        "name": "Main Hall",
+        "device_id": "930f3621-05df-4574-9270-9d994c5b716c",
+        "position": [-16, 2, 8],
+        "size": [14, 4, 12],
+        "hp_id": "HP-D1",
+        "hp_pos": [-16, 5.1, 8],
+    },
 ]
 
 _OFFLINE_ROOMS = [
-    {"id": "hall-e",    "name": "Hall E",         "position": [0, 2, 8],  "size": [14, 4, 12]},
+    {"id": "hall-e", "name": "Hall E", "position": [0, 2, 8], "size": [14, 4, 12]},
     {"id": "tech-room", "name": "Technical Room", "position": [16, 2, 8], "size": [14, 4, 12]},
 ]
 
-CO2_KG_PER_KWH   = 0.380
-EUR_PER_KWH       = 0.25
+CO2_KG_PER_KWH = 0.380
+EUR_PER_KWH = 0.25
 IHL_SAVINGS_FACTOR = 0.25
 
 
@@ -394,24 +434,36 @@ def _weather_label(code: object) -> str:
     if code is None:
         return "Clear"
     c = int(code)  # type: ignore[arg-type]
-    if c == 0:           return "Clear"
-    if 1 <= c <= 3:      return "Partly Cloudy"
-    if 45 <= c <= 48:    return "Foggy"
-    if 51 <= c <= 67:    return "Drizzle"
-    if 71 <= c <= 77:    return "Snow"
-    if 80 <= c <= 86:    return "Showers"
-    if 95 <= c <= 99:    return "Thunderstorm"
+    if c == 0:
+        return "Clear"
+    if 1 <= c <= 3:
+        return "Partly Cloudy"
+    if 45 <= c <= 48:
+        return "Foggy"
+    if 51 <= c <= 67:
+        return "Drizzle"
+    if 71 <= c <= 77:
+        return "Snow"
+    if 80 <= c <= 86:
+        return "Showers"
+    if 95 <= c <= 99:
+        return "Thunderstorm"
     return "Cloudy"
 
 
 def _make_offline_room(cfg: dict) -> dict:
     return {
-        "id": cfg["id"], "name": cfg["name"],
-        "position": cfg["position"], "size": cfg["size"],
+        "id": cfg["id"],
+        "name": cfg["name"],
+        "position": cfg["position"],
+        "size": cfg["size"],
         "status": "idle",
         "temperature": {"current": 18.0, "target": 21.0, "outside": 15.0},
         "occupancy": {"current": 0, "max": 50},
-        "heatPumps": [], "tempHistory": [], "energyHistory": [], "anomalies": [],
+        "heatPumps": [],
+        "tempHistory": [],
+        "energyHistory": [],
+        "anomalies": [],
     }
 
 
@@ -440,20 +492,20 @@ def _compute_advice(
     Compute occupancy status, ETA to target, efficiency, and a plain-language
     recommendation for the detail panel.
     """
-    from datetime import datetime, timezone
+    from datetime import datetime
 
-    now_utc = datetime.now(timezone.utc)
+    now_utc = datetime.now(UTC)
     hour = now_utc.hour + now_utc.minute / 60.0
 
     # ── Occupancy ────────────────────────────────────────────────────────────
     # Space events run 04:30-21:30 every day in the dataset.
     # We use real time-of-day as a proxy for live occupancy.
-    OCCUPIED_START = 4.5   # 04:30
-    OCCUPIED_END   = 21.5  # 21:30
-    PREHEAT_WINDOW = 0.5   # 30 min before start
+    OCCUPIED_START = 4.5  # 04:30
+    OCCUPIED_END = 21.5  # 21:30
+    PREHEAT_WINDOW = 0.5  # 30 min before start
 
-    is_occupied    = OCCUPIED_START <= hour < OCCUPIED_END
-    preheat_soon   = (OCCUPIED_START - PREHEAT_WINDOW) <= hour < OCCUPIED_START
+    is_occupied = OCCUPIED_START <= hour < OCCUPIED_END
+    preheat_soon = (OCCUPIED_START - PREHEAT_WINDOW) <= hour < OCCUPIED_START
 
     if is_occupied:
         occ_status = "occupied"
@@ -469,7 +521,7 @@ def _compute_advice(
     # ── Heating / cooling rate from historical intervals ──────────────────────
     # Prefer cooling-window data; fall back to heating window; then physics default.
     # Typical ORIO-025 in a 150 m² room: ~0.4–0.6 °C per 15 min under load.
-    HEAT_RATE_DEFAULT = 0.5   # °C per 15-min interval (heating)
+    HEAT_RATE_DEFAULT = 0.5  # °C per 15-min interval (heating)
     COOL_RATE_DEFAULT = -0.4  # °C per 15-min interval (cooling)
 
     eta_minutes: int | None = None
@@ -489,7 +541,11 @@ def _compute_advice(
     if heat_rate == 0.0 and cool_rate == 0.0:
         try:
             heat_ivs = loader.intervals("heating")
-            heat_ivs = heat_ivs[heat_ivs["device_id"] == dev_ivs["device_id"].iloc[0]] if not dev_ivs.empty else heat_ivs
+            heat_ivs = (
+                heat_ivs[heat_ivs["device_id"] == dev_ivs["device_id"].iloc[0]]
+                if not dev_ivs.empty
+                else heat_ivs
+            )
             heat_rate, cool_rate = _rates_from_ivs(heat_ivs)
             if heat_rate != 0.0 or cool_rate != 0.0:
                 rate_source = "measured (heating window)"
@@ -507,12 +563,12 @@ def _compute_advice(
     delta = target - temp_c
     if delta > 0.3:
         eta_intervals = delta / heat_rate
-        eta_minutes   = max(1, int(eta_intervals * 15))
+        eta_minutes = max(1, int(eta_intervals * 15))
         if heat_rate != HEAT_RATE_DEFAULT:
             rate_source = "measured"
     elif delta < -0.3:
         eta_intervals = delta / abs(cool_rate)
-        eta_minutes   = max(1, int(eta_intervals * 15))
+        eta_minutes = max(1, int(eta_intervals * 15))
         if cool_rate != COOL_RATE_DEFAULT:
             rate_source = "measured"
     else:
@@ -528,26 +584,26 @@ def _compute_advice(
     if needs_heat:
         if outside_temp >= 5:
             efficiency = "good"
-            eff_note   = f"Outside {outside_temp}°C — heat pump COP is high."
+            eff_note = f"Outside {outside_temp}°C — heat pump COP is high."
         elif outside_temp >= -5:
             efficiency = "fair"
-            eff_note   = f"Outside {outside_temp}°C — moderate efficiency."
+            eff_note = f"Outside {outside_temp}°C — moderate efficiency."
         else:
             efficiency = "poor"
-            eff_note   = f"Outside {outside_temp}°C — consider pre-heating earlier."
+            eff_note = f"Outside {outside_temp}°C — consider pre-heating earlier."
     elif needs_cool:
         if outside_temp <= 30:
             efficiency = "good"
-            eff_note   = f"Outside {outside_temp}°C — cooling is efficient."
+            eff_note = f"Outside {outside_temp}°C — cooling is efficient."
         elif outside_temp <= 38:
             efficiency = "fair"
-            eff_note   = f"Outside {outside_temp}°C — moderate cooling efficiency."
+            eff_note = f"Outside {outside_temp}°C — moderate cooling efficiency."
         else:
             efficiency = "poor"
-            eff_note   = f"Outside {outside_temp}°C — cooling heavily loaded."
+            eff_note = f"Outside {outside_temp}°C — cooling heavily loaded."
     else:
         efficiency = "good"
-        eff_note   = "Room is at target — minimal energy needed."
+        eff_note = "Room is at target — minimal energy needed."
 
     # ── ETA label ─────────────────────────────────────────────────────────────
     if eta_minutes is None:
@@ -567,7 +623,7 @@ def _compute_advice(
     if occ_status == "unoccupied":
         if diff > 1.0:
             rec_lines.append(
-                f"Hall is unoccupied until ~04:30. "
+                "Hall is unoccupied until ~04:30. "
                 "Consider lowering target to minimum (12°C) to save energy."
             )
         else:
@@ -582,13 +638,17 @@ def _compute_advice(
     mode_upper = current_mode.upper()
     if needs_heat:
         action = "Set mode to HEAT." if mode_upper not in ("HEAT", "AUTO") else ""
-        mismatch = f" Currently in {mode_upper} mode — switch to HEAT." if mode_upper == "COOL" else ""
+        mismatch = (
+            f" Currently in {mode_upper} mode — switch to HEAT." if mode_upper == "COOL" else ""
+        )
         rec_lines.append(
             f"Room {temp_c:.1f}°C is {delta:.1f}°C below target.{mismatch or (' ' + action if action else '')}"
         )
     elif needs_cool:
         action = "Set mode to COOL." if mode_upper not in ("COOL", "AUTO") else ""
-        mismatch = f" Currently in {mode_upper} mode — switch to COOL." if mode_upper == "HEAT" else ""
+        mismatch = (
+            f" Currently in {mode_upper} mode — switch to COOL." if mode_upper == "HEAT" else ""
+        )
         rec_lines.append(
             f"Room {temp_c:.1f}°C is {abs(delta):.1f}°C above target.{mismatch or (' ' + action if action else '')}"
         )
@@ -601,16 +661,16 @@ def _compute_advice(
     recommendation = " ".join(rec_lines) if rec_lines else "No action needed."
 
     return {
-        "occupancyStatus":    occ_status,
-        "minutesToOccupied":  minutes_to_occupied,
-        "etaMinutes":         eta_minutes,
-        "etaLabel":           eta_label,
-        "etaSource":          rate_source,
-        "efficiency":         efficiency,
-        "efficiencyNote":     eff_note,
-        "recommendation":     recommendation,
-        "needsHeat":          needs_heat,
-        "needsCool":          needs_cool,
+        "occupancyStatus": occ_status,
+        "minutesToOccupied": minutes_to_occupied,
+        "etaMinutes": eta_minutes,
+        "etaLabel": eta_label,
+        "etaSource": rate_source,
+        "efficiency": efficiency,
+        "efficiencyNote": eff_note,
+        "recommendation": recommendation,
+        "needsHeat": needs_heat,
+        "needsCool": needs_cool,
     }
 
 
@@ -621,19 +681,19 @@ def frontend_status() -> Response:
     Returns 4 device-backed rooms + 2 offline placeholders (6 total).
     """
     WINDOW = "cooling"  # most recent data window (2026-05-25 to 2026-05-31)
-    INTERVAL_HOURS = 5 / 60   # power_draw: 5-minute samples
+    INTERVAL_HOURS = 5 / 60  # power_draw: 5-minute samples
 
     # ── Raw data ──────────────────────────────────────────────────────────────
     df = loader.snapshots(WINDOW).copy()
     df["last_seen_at"] = pd.to_datetime(df["last_seen_at"])
 
-    ivs = loader.intervals(WINDOW).copy()            # FIFTEEN_MINUTES only
+    ivs = loader.intervals(WINDOW).copy()  # FIFTEEN_MINUTES only
     ivs["interval_start_time"] = pd.to_datetime(ivs["interval_start_time"])
 
     pwr = loader.power_draw(WINDOW).copy()
     # timestamp already parsed by loader
 
-    ctrl      = controller.get_status()
+    ctrl = controller.get_status()
     ctrl_devs = {d["device_id"]: d for d in ctrl["devices"]}
 
     try:
@@ -645,7 +705,7 @@ def frontend_status() -> Response:
         alerts_by_dev.setdefault(a["device_id"], []).append(a)
 
     try:
-        imp      = impact.summary()
+        imp = impact.summary()
         total_sav: dict = imp.get("total", {})
     except Exception:
         total_sav = {}
@@ -653,11 +713,11 @@ def frontend_status() -> Response:
     # Live weather — fail gracefully
     weather: dict = {"temp": 15.0, "humidity": 60, "condition": "Clear"}
     try:
-        w    = fetch_current(DEFAULT_LAT, DEFAULT_LON)
+        w = fetch_current(DEFAULT_LAT, DEFAULT_LON)
         curr = w.get("current", {})
         weather = {
-            "temp":      round(_safe_float(curr.get("temperature_2m"), 15.0), 1),
-            "humidity":  int(_safe_float(curr.get("relative_humidity_2m"), 60)),
+            "temp": round(_safe_float(curr.get("temperature_2m"), 15.0), 1),
+            "humidity": int(_safe_float(curr.get("relative_humidity_2m"), 60)),
             "condition": _weather_label(curr.get("weather_code")),
         }
     except Exception:
@@ -667,12 +727,12 @@ def frontend_status() -> Response:
 
     # ── Build rooms ───────────────────────────────────────────────────────────
     rooms: list[dict] = []
-    total_units  = 0
+    total_units = 0
     active_units = 0
-    alert_count  = 0
+    alert_count = 0
 
     for cfg in _ROOM_MAP:
-        did       = cfg["device_id"]
+        did = cfg["device_id"]
         dev_snaps = df[df["device_id"] == did].sort_values("last_seen_at")
 
         if dev_snaps.empty:
@@ -689,33 +749,37 @@ def frontend_status() -> Response:
             unit_st = "idle"
         elif bool(latest.get("status_is_alarm_active", 0)):
             unit_st = "error"
-        elif bool(latest.get("status_is_defrost_active", 0)):
+        elif bool(latest.get("status_is_defrost_active", 0)) or regs not in ("0,0,0,0", "0", ""):
             unit_st = "warning"
-        elif regs not in ("0,0,0,0", "0", ""):
-            unit_st = "warning"
-        elif bool(latest.get("status_is_heating_required", 0)) or bool(latest.get("status_is_cooling_required", 0)):
+        elif bool(latest.get("status_is_heating_required", 0)) or bool(
+            latest.get("status_is_cooling_required", 0)
+        ):
             unit_st = "active"
         else:
             unit_st = "idle"
 
-        room_st = "error" if unit_st == "error" else ("warning" if unit_st == "warning" else "optimal")
+        room_st = (
+            "error" if unit_st == "error" else ("warning" if unit_st == "warning" else "optimal")
+        )
 
-        total_units  += 1
-        if unit_st == "active": active_units += 1
-        if unit_st in ("warning", "error"): alert_count += 1
+        total_units += 1
+        if unit_st == "active":
+            active_units += 1
+        if unit_st in ("warning", "error"):
+            alert_count += 1
 
         # ── Sensor readings ───────────────────────────────────────────────────
-        temp_c    = _safe_float(latest.get("status_temperature_in_celsius"), 21.0)
-        temp_sup  = _safe_float(latest.get("status_temperature_supply_in_celsius"), 35.0)
-        temp_ret  = _safe_float(latest.get("status_temperature_return_in_celsius"), 20.0)
-        temp_out  = _safe_float(latest.get("status_temperature_outside_in_celsius"), outside_temp)
-        humidity  = _safe_float(latest.get("status_humidity_in_percent"), 50.0)
-        co2_ppm   = _safe_float(latest.get("status_carbon_dioxide_in_ppm"), 400.0)
-        fan_sup   = _safe_float(latest.get("status_air_flow_supply_in_percent"), 0.0)
-        fan_ret   = _safe_float(latest.get("status_air_flow_return_in_percent"), 0.0)
-        uptime_s  = _safe_float(latest.get("status_system_uptime_in_seconds"), 0.0)
-        raw_regs  = str(latest.get("status_error_registers", "0,0,0,0"))
-        op_mode   = str(latest.get("status_operation_mode", "AUTO"))
+        temp_c = _safe_float(latest.get("status_temperature_in_celsius"), 21.0)
+        temp_sup = _safe_float(latest.get("status_temperature_supply_in_celsius"), 35.0)
+        temp_ret = _safe_float(latest.get("status_temperature_return_in_celsius"), 20.0)
+        temp_out = _safe_float(latest.get("status_temperature_outside_in_celsius"), outside_temp)
+        humidity = _safe_float(latest.get("status_humidity_in_percent"), 50.0)
+        co2_ppm = _safe_float(latest.get("status_carbon_dioxide_in_ppm"), 400.0)
+        fan_sup = _safe_float(latest.get("status_air_flow_supply_in_percent"), 0.0)
+        fan_ret = _safe_float(latest.get("status_air_flow_return_in_percent"), 0.0)
+        uptime_s = _safe_float(latest.get("status_system_uptime_in_seconds"), 0.0)
+        raw_regs = str(latest.get("status_error_registers", "0,0,0,0"))
+        op_mode = str(latest.get("status_operation_mode", "AUTO"))
 
         # ── Current power ─────────────────────────────────────────────────────
         dev_pwr = pwr[pwr["device_id"] == did]["power_draw_kw"]
@@ -735,27 +799,33 @@ def frontend_status() -> Response:
 
         # Outside temperature: resample snapshots to 15-min averages
         indexed_snaps = dev_snaps.set_index("last_seen_at")
-        h_out = pd.to_numeric(
-            indexed_snaps.get("status_temperature_outside_in_celsius", pd.Series(dtype=float)),
-            errors="coerce",
-        ).resample("15min").mean()
+        h_out = (
+            pd.to_numeric(
+                indexed_snaps.get("status_temperature_outside_in_celsius", pd.Series(dtype=float)),
+                errors="coerce",
+            )
+            .resample("15min")
+            .mean()
+        )
 
         temp_history: list[dict] = []
         for _, row in dev_ivs.tail(96).iterrows():
-            ts  = row["interval_start_time"]
+            ts = row["interval_start_time"]
             val = _safe_float(row.get("median_temperature_in_celsius"), float("nan"))
             tgt = _safe_float(row.get("target_temperature_in_celsius"), target)
             # Find nearest outside temp bucket
             out_key = ts.floor("15min")
-            out_v   = h_out.get(out_key, temp_out)
+            out_v = h_out.get(out_key, temp_out)
             if val != val:  # NaN
                 continue
-            temp_history.append({
-                "time":    ts.strftime("%H:%M"),
-                "temp":    round(val, 1),
-                "target":  round(tgt, 1),
-                "outside": round(_safe_float(out_v, temp_out), 1),
-            })
+            temp_history.append(
+                {
+                    "time": ts.strftime("%H:%M"),
+                    "temp": round(val, 1),
+                    "target": round(tgt, 1),
+                    "outside": round(_safe_float(out_v, temp_out), 1),
+                }
+            )
 
         # ── 7-day energy comparison chart ─────────────────────────────────────
         pwr_idx = dev_pwr.copy()
@@ -764,70 +834,78 @@ def frontend_status() -> Response:
         for ts, avg_kw in pwr_idx.resample("1D").mean().tail(7).items():
             if pd.isna(avg_kw):
                 continue
-            actual_day   = float(avg_kw) * 24
+            actual_day = float(avg_kw) * 24
             baseline_day = actual_day / (1 - IHL_SAVINGS_FACTOR)
-            energy_history.append({
-                "day":      ts.strftime("%a"),
-                "actual":   round(actual_day, 1),
-                "baseline": round(baseline_day, 1),
-            })
+            energy_history.append(
+                {
+                    "day": ts.strftime("%a"),
+                    "actual": round(actual_day, 1),
+                    "baseline": round(baseline_day, 1),
+                }
+            )
 
         # ── Anomalies from detector (decoded, capped at 5) ────────────────────
         anomalies: list[dict] = []
         for a in alerts_by_dev.get(did, [])[:5]:
             ts_str = str(a.get("timestamp", ""))
-            anomalies.append({
-                "id":       f"{a['type']}-{ts_str[:10]}",
-                "severity": "high" if a["severity"] == "critical" else a["severity"],
-                "type":     a["type"].replace("_", " ").title(),
-                "message":  a["message"],
-                "time":     ts_str[11:16] or "—",
-                "resolved": False,
-            })
+            anomalies.append(
+                {
+                    "id": f"{a['type']}-{ts_str[:10]}",
+                    "severity": "high" if a["severity"] == "critical" else a["severity"],
+                    "type": a["type"].replace("_", " ").title(),
+                    "message": a["message"],
+                    "time": ts_str[11:16] or "—",
+                    "resolved": False,
+                }
+            )
 
         advice = _compute_advice(temp_c, target, temp_out, dev_ivs, op_mode)
 
-        rooms.append({
-            "id":       cfg["id"],
-            "name":     cfg["name"],
-            "position": cfg["position"],
-            "size":     cfg["size"],
-            "status":   room_st,
-            "temperature": {
-                "current": round(temp_c,   1),
-                "target":  round(target,   1),
-                "outside": round(temp_out, 1),
-            },
-            "occupancy": {"current": 0, "max": 50},
-            "advice":    advice,
-            "heatPumps": [{
-                "id":       cfg["hp_id"],
-                "deviceId": did,
-                "name":     f"IMBAT Orion {cfg['hp_id']}",
-                "model":    "ORIO-025",
-                "status":   unit_st,
-                "position": cfg["hp_pos"],
-                "power":    {"current": pwr_now, "max": 25.0},
-                "runtime":  _uptime_str(uptime_s),
-                "mode":     op_mode,
+        rooms.append(
+            {
+                "id": cfg["id"],
+                "name": cfg["name"],
+                "position": cfg["position"],
+                "size": cfg["size"],
+                "status": room_st,
                 "temperature": {
-                    "supply":  round(temp_sup, 1),
-                    "return":  round(temp_ret, 1),
+                    "current": round(temp_c, 1),
+                    "target": round(target, 1),
+                    "outside": round(temp_out, 1),
                 },
-                "airFlow": {
-                    "supply": round(fan_sup, 1),
-                    "return": round(fan_ret, 1),
-                },
-                "humidity":     round(humidity, 1),
-                "co2Ppm":       round(co2_ppm, 0),
-                "rawErrorRegisters": raw_regs,
-                "savings":      unit_savings,
-                "anomalies":    anomalies,
-            }],
-            "tempHistory":   temp_history,
-            "energyHistory": energy_history,
-            "anomalies":     anomalies,
-        })
+                "occupancy": {"current": 0, "max": 50},
+                "advice": advice,
+                "heatPumps": [
+                    {
+                        "id": cfg["hp_id"],
+                        "deviceId": did,
+                        "name": f"IMBAT Orion {cfg['hp_id']}",
+                        "model": "ORIO-025",
+                        "status": unit_st,
+                        "position": cfg["hp_pos"],
+                        "power": {"current": pwr_now, "max": 25.0},
+                        "runtime": _uptime_str(uptime_s),
+                        "mode": op_mode,
+                        "temperature": {
+                            "supply": round(temp_sup, 1),
+                            "return": round(temp_ret, 1),
+                        },
+                        "airFlow": {
+                            "supply": round(fan_sup, 1),
+                            "return": round(fan_ret, 1),
+                        },
+                        "humidity": round(humidity, 1),
+                        "co2Ppm": round(co2_ppm, 0),
+                        "rawErrorRegisters": raw_regs,
+                        "savings": unit_savings,
+                        "anomalies": anomalies,
+                    }
+                ],
+                "tempHistory": temp_history,
+                "energyHistory": energy_history,
+                "anomalies": anomalies,
+            }
+        )
 
     # Offline placeholder halls
     for cfg in _OFFLINE_ROOMS:
@@ -839,18 +917,20 @@ def frontend_status() -> Response:
     saved_co2 = _safe_float(total_sav.get("co2_saved_kg"), 0)
     days = 14  # two 7-day windows combined
 
-    return jsonify({
-        "rooms": rooms,
-        "savings": {
-            "kwh": {"today": round(saved_kwh / days, 1), "total": round(saved_kwh, 1)},
-            "co2": {"today": round(saved_co2 / days, 1), "total": round(saved_co2, 1)},
-            "eur": {"today": round(saved_eur / days, 2), "total": round(saved_eur, 2)},
-        },
-        "weather": weather,
-        "mode":    ctrl["mode"],
-        "stats": {
-            "activeUnits": active_units,
-            "totalUnits":  total_units,
-            "alerts":      alert_count,
-        },
-    })
+    return jsonify(
+        {
+            "rooms": rooms,
+            "savings": {
+                "kwh": {"today": round(saved_kwh / days, 1), "total": round(saved_kwh, 1)},
+                "co2": {"today": round(saved_co2 / days, 1), "total": round(saved_co2, 1)},
+                "eur": {"today": round(saved_eur / days, 2), "total": round(saved_eur, 2)},
+            },
+            "weather": weather,
+            "mode": ctrl["mode"],
+            "stats": {
+                "activeUnits": active_units,
+                "totalUnits": total_units,
+                "alerts": alert_count,
+            },
+        }
+    )

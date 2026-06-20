@@ -4,7 +4,7 @@ estimated_files: 1
 skills_used: []
 ---
 
-# T01: Build SARIMAX forecasting notebook
+# T01: Built the SARIMAX temperature forecasting notebook and added unit tests for model training and forecasting.
 
 ## Why
 R002 requires ARIMA/SARIMAX models to forecast indoor room temperatures. This task creates the core notebook artifact.

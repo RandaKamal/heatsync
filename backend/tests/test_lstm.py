@@ -1,10 +1,9 @@
 import numpy as np
 import pytest
 import torch
+from notebooks.utils import load_processed
 from torch import nn
 from torch.utils.data import DataLoader, TensorDataset
-
-from notebooks.utils import load_processed
 
 
 class LSTMForecaster(nn.Module):
@@ -17,7 +16,8 @@ class LSTMForecaster(nn.Module):
         # x shape: (batch, seq_len, input_dim)
         _, (hn, _) = self.lstm(x)
         # We take the final hidden state of the LSTM sequence from the last layer
-        return self.linear(hn[-1]).squeeze(-1)
+        val: torch.Tensor = self.linear(hn[-1]).squeeze(-1)
+        return val
 
 
 def create_sequences(
@@ -294,13 +294,8 @@ def test_sequence_creation_invalid_inputs() -> None:
     data = np.random.randn(10, 3)
     # Target index out of bounds
     with pytest.raises(IndexError):
-        create_sequences(
-            data, target_idx=5, covariate_indices=[1], seq_len=5, horizon=1
-        )
+        create_sequences(data, target_idx=5, covariate_indices=[1], seq_len=5, horizon=1)
 
     # Covariate index out of bounds
     with pytest.raises(IndexError):
-        create_sequences(
-            data, target_idx=0, covariate_indices=[5], seq_len=5, horizon=1
-        )
-
+        create_sequences(data, target_idx=0, covariate_indices=[5], seq_len=5, horizon=1)

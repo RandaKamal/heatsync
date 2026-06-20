@@ -25,13 +25,13 @@ S02 consumes `backend/notebooks/utils.py` (`load_processed`) and `backend/data/p
 
 ## Tasks
 
-- [ ] **T01: Build SARIMAX forecasting notebook** `est:1-2 hours`
+- [x] **T01: Built the SARIMAX temperature forecasting notebook and added unit tests for model training and forecasting.** `est:1-2 hours`
   ## Why
   R002 requires ARIMA/SARIMAX models to forecast indoor room temperatures. This task creates the core notebook artifact.
   - Files: `backend/notebooks/02_forecasting_sarimax.ipynb`
   - Verify: uv run --project backend jupyter nbconvert --to notebook --execute --ExecutePreprocessor.timeout=600 backend/notebooks/02_forecasting_sarimax.ipynb && echo 'Notebook executed successfully'
 
-- [ ] **T02: Verify notebook execution and quality gates** `est:30 minutes`
+- [x] **T02: Verified notebook execution and closed quality gates for the SARIMAX temperature forecasting slice.** `est:30 minutes`
   ## Why
   Ensure the SARIMAX notebook meets milestone quality standards: programmatic execution, linting, type checking, and that RMSE/MAPE metrics are actually present in output.
   - Files: `backend/notebooks/02_forecasting_sarimax.ipynb`

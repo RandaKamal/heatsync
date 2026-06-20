@@ -1,7 +1,7 @@
 # Codebase Map
 
-Generated: 2026-06-20T11:03:07Z | Files: 147 | Described: 0/147
-<!-- gsd:codebase-meta {"generatedAt":"2026-06-20T11:03:07Z","fingerprint":"c2e22eaae39becfbdae7ed2225f442d726e037e1","fileCount":147,"truncated":false} -->
+Generated: 2026-06-20T13:09:48Z | Files: 153 | Described: 0/153
+<!-- gsd:codebase-meta {"generatedAt":"2026-06-20T13:09:48Z","fingerprint":"6e98c038cf8630ccb3db8e4f0b478f3f001465b3","fileCount":153,"truncated":false} -->
 
 ### (root)/
 - `.gitignore`
@@ -10,6 +10,7 @@ Generated: 2026-06-20T11:03:07Z | Files: 147 | Described: 0/147
 - `AGENTS.md`
 - `CLAUDE.md`
 - `GEMINI.md`
+- `pytest_err.txt`
 - `README_FAILURE_SIMULATION.md`
 - `README.md`
 - `skills-lock.json`
@@ -115,6 +116,9 @@ Generated: 2026-06-20T11:03:07Z | Files: 147 | Described: 0/147
 ### backend/notebooks/
 - `backend/notebooks/__init__.py`
 - `backend/notebooks/01_preprocessing.ipynb`
+- `backend/notebooks/02_forecasting_sarimax.ipynb`
+- `backend/notebooks/03_forecasting_lstm.ipynb`
+- `backend/notebooks/03_forecasting_lstm.nbconvert.ipynb`
 - `backend/notebooks/py.typed`
 - `backend/notebooks/utils.py`
 
@@ -126,6 +130,8 @@ Generated: 2026-06-20T11:03:07Z | Files: 147 | Described: 0/147
 - `backend/tests/test_api.py`
 - `backend/tests/test_impact.py`
 - `backend/tests/test_loader.py`
+- `backend/tests/test_lstm.py`
+- `backend/tests/test_sarimax.py`
 - `backend/tests/test_utils.py`
 
 ### backups/ihl-twinguard-3d/
