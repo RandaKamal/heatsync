@@ -1,12 +1,9 @@
 """
 Weather forecast service using Open-Meteo (free, no API key required).
-Location: Ottobrunn-Taufkirchen, Munich area — TUM Aerospace & Geodesy Campus.
+Location: Ottobrunn-Taufkirchen, Munich area - TUM Aerospace & Geodesy Campus.
 """
 
-from datetime import datetime, timezone
-from typing import Optional
-
-UTC = timezone.utc
+from datetime import UTC, datetime
 
 import requests
 
@@ -110,7 +107,7 @@ def _parse_daily(raw: dict) -> list[dict]:
     return rows
 
 
-def _safe(lst: Optional[list], i: int) -> Optional[object]:
+def _safe(lst: list[object] | None, i: int) -> object | None:
     if lst is None or i >= len(lst):
         return None
     return lst[i]

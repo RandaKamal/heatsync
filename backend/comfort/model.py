@@ -38,7 +38,6 @@ Occupancy effect on setpoint:
 
 import math
 from datetime import date, timedelta
-from typing import Optional
 
 # ── constants ─────────────────────────────────────────────────────────────────
 
@@ -273,7 +272,7 @@ def _bavaria_holidays(year: int) -> dict[date, str]:
     return {**fixed, **variable}
 
 
-def is_holiday_bavaria(d: date) -> Optional[str]:
+def is_holiday_bavaria(d: date) -> str | None:
     """Returns the holiday name if d is a Bayern Feiertag, else None."""
     return _bavaria_holidays(d.year).get(d)
 

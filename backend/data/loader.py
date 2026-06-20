@@ -1,6 +1,4 @@
-from datetime import datetime, timedelta, timezone
-
-UTC = timezone.utc
+from datetime import UTC, datetime, timedelta
 
 import pandas as pd
 

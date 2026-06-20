@@ -1,7 +1,7 @@
 # Codebase Map
 
-Generated: 2026-06-19T23:26:43Z | Files: 104 | Described: 0/104
-<!-- gsd:codebase-meta {"generatedAt":"2026-06-19T23:26:43Z","fingerprint":"0dea2fc4aeff2ed4186f6d9487f297fc633bfdd7","fileCount":104,"truncated":false} -->
+Generated: 2026-06-20T16:52:41Z | Files: 160 | Described: 0/160
+<!-- gsd:codebase-meta {"generatedAt":"2026-06-20T16:52:41Z","fingerprint":"0723e2194193901b2d67e83d5dc9b838e9451949","fileCount":160,"truncated":false} -->
 
 ### (root)/
 - `.gitignore`
@@ -10,6 +10,7 @@ Generated: 2026-06-19T23:26:43Z | Files: 104 | Described: 0/104
 - `AGENTS.md`
 - `CLAUDE.md`
 - `GEMINI.md`
+- `pytest_err.txt`
 - `README_FAILURE_SIMULATION.md`
 - `README.md`
 - `skills-lock.json`
@@ -21,9 +22,9 @@ Generated: 2026-06-19T23:26:43Z | Files: 104 | Described: 0/104
 - `.github/agents/analysis-eval-engineer.agent.md`
 - `.github/agents/code-reviewer.agent.md`
 - `.github/agents/docs-maintainer.agent.md`
+- `.github/agents/heatsync-detection-engineer.agent.md`
 - `.github/agents/signal-processing-engineer.agent.md`
 - `.github/agents/test-engineer.agent.md`
-- `.github/agents/heatmap-detection-engineer.agent.md`
 
 ### .github/instructions/
 - `.github/instructions/agent_maintenance_workflow.instructions.md`
@@ -70,32 +71,75 @@ Generated: 2026-06-19T23:26:43Z | Files: 104 | Described: 0/104
 ### backend/
 - `backend/.python-version`
 - `backend/app.py`
-- `backend/loader.py`
 - `backend/pyproject.toml`
 - `backend/README.md`
 - `backend/requirements.txt`
 
 ### backend/anomaly/
+- `backend/anomaly/__init__.py`
 - `backend/anomaly/detector.py`
 
 ### backend/api/
+- `backend/api/__init__.py`
 - `backend/api/routes.py`
 - `backend/api/weather.py`
 
 ### backend/comfort/
+- `backend/comfort/__init__.py`
 - `backend/comfort/model.py`
 
 ### backend/control/
+- `backend/control/__init__.py`
 - `backend/control/controller.py`
 
 ### backend/data/
+- `backend/data/__init__.py`
 - `backend/data/.gitkeep`
+- `backend/data/loader.py`
+
+### backend/features/
+- `backend/features/s01_data_preprocessing.feature`
+- `backend/features/s02_statistical_forecasting.feature`
+- `backend/features/s03_machine_learning_two_level_models.feature`
+- `backend/features/s04_physical_grey_box_pinn_models.feature`
+- `backend/features/s05_anomaly_detection_models.feature`
+- `backend/features/s06_energy_controls_savings_optimization.feature`
+- `backend/features/s07_automated_notebook_suite_integration.feature`
+
+### backend/features/steps/
+- `backend/features/steps/.gitkeep`
 
 ### backend/impact/
+- `backend/impact/__init__.py`
 - `backend/impact/calculator.py`
 
+### backend/notebooks/
+- `backend/notebooks/__init__.py`
+- `backend/notebooks/01_preprocessing.ipynb`
+- `backend/notebooks/02_forecasting_sarimax.ipynb`
+- `backend/notebooks/03_forecasting_lstm.ipynb`
+- `backend/notebooks/04_physical_modeling.ipynb`
+- `backend/notebooks/05_anomaly_detection.ipynb`
+- `backend/notebooks/06_energy_controls.ipynb`
+- `backend/notebooks/py.typed`
+- `backend/notebooks/utils.py`
+
 ### backend/prediction/
+- `backend/prediction/__init__.py`
 - `backend/prediction/predictor.py`
+
+### backend/tests/
+- `backend/tests/test_anomaly_detection.py`
+- `backend/tests/test_anomaly.py`
+- `backend/tests/test_api.py`
+- `backend/tests/test_energy.py`
+- `backend/tests/test_impact.py`
+- `backend/tests/test_loader.py`
+- `backend/tests/test_lstm.py`
+- `backend/tests/test_notebooks.py`
+- `backend/tests/test_physical.py`
+- `backend/tests/test_sarimax.py`
+- `backend/tests/test_utils.py`
 
 ### backups/ihl-twinguard-3d/
 - `backups/ihl-twinguard-3d/.gitignore`
@@ -168,3 +212,37 @@ Generated: 2026-06-19T23:26:43Z | Files: 104 | Described: 0/104
 
 ### frontend/src/utils/
 - `frontend/src/utils/status.ts`
+
+### frontendv2/
+- `frontendv2/index.html`
+- `frontendv2/package-lock.json`
+- `frontendv2/package.json`
+- `frontendv2/vite.config.js`
+
+### frontendv2/public/
+- `frontendv2/public/catalog.html`
+
+### frontendv2/src/
+- `frontendv2/src/App.css`
+- `frontendv2/src/App.jsx`
+- `frontendv2/src/main.jsx`
+
+### frontendv2/src/building3d/
+- `frontendv2/src/building3d/BuildingModel.jsx`
+- `frontendv2/src/building3d/BuildingViewer.jsx`
+- `frontendv2/src/building3d/FloorLayer.jsx`
+- `frontendv2/src/building3d/HeatMapOverlay.jsx`
+- `frontendv2/src/building3d/HeatPumpUnit.jsx`
+- `frontendv2/src/building3d/SensorMarkers.jsx`
+
+### frontendv2/src/components/
+- `frontendv2/src/components/AlertsPanel.jsx`
+- `frontendv2/src/components/AlertToast.jsx`
+- `frontendv2/src/components/TopBar.jsx`
+
+### frontendv2/src/hooks/
+- `frontendv2/src/hooks/useBackendStatus.js`
+- `frontendv2/src/hooks/useTimeOfDay.js`
+
+### frontendv2/src/panels/
+- `frontendv2/src/panels/UnitDetailPanel.jsx`
