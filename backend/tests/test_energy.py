@@ -2,11 +2,11 @@
 import os
 import sys
 
-import nbformat  # type: ignore[import-untyped]
+import nbformat
 import numpy as np
 import pytest
-import scipy.optimize  # type: ignore[import-untyped]
-from nbconvert.preprocessors import ExecutePreprocessor  # type: ignore[import-untyped]
+import scipy.optimize
+from nbconvert.preprocessors import ExecutePreprocessor
 
 # Ensure the backend directory is in the path
 backend_path = os.path.abspath(os.path.dirname(os.path.dirname(__file__)))

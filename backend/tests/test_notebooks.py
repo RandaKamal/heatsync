@@ -1,11 +1,8 @@
 import os
 
-import nbformat  # type: ignore[import-untyped]
+import nbformat
 import pytest
-from nbconvert.preprocessors import (
-    CellExecutionError,  # type: ignore[import-untyped]
-    ExecutePreprocessor,  # type: ignore[import-untyped]
-)
+from nbconvert.preprocessors import CellExecutionError, ExecutePreprocessor
 
 NOTEBOOKS_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "notebooks"))
 
