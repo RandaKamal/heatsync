@@ -15,12 +15,12 @@ Rates (Germany 2024-2026):
 """
 
 import pandas as pd
-from loader import power_draw, power_draw_all, devices, intervals
+from loader import devices, intervals, power_draw, power_draw_all
 
 ELECTRICITY_PRICE_EUR_PER_KWH = 0.25
 CO2_KG_PER_KWH = 0.380
-INTERVAL_HOURS = 5 / 60          # power_draw sampled every 5 minutes
-IHL_SAVINGS_FACTOR = 0.25        # 25 % savings midpoint from PDF (20–30 %)
+INTERVAL_HOURS = 5 / 60  # power_draw sampled every 5 minutes
+IHL_SAVINGS_FACTOR = 0.25  # 25 % savings midpoint from PDF (20-30 %)
 
 
 def _energy_kwh(df: pd.DataFrame) -> float:
@@ -113,16 +113,9 @@ def timeline(window: str, bucket: str = "1h") -> list[dict]:
     bucket: pandas offset alias — '15min', '1h', '1D'
     """
     df = power_draw(window).set_index("timestamp")
-    grouped = (
-        df.groupby("device_name")["power_draw_kw"]
-        .resample(bucket)
-        .mean()
-        .reset_index()
-    )
+    grouped = df.groupby("device_name")["power_draw_kw"].resample(bucket).mean().reset_index()
     grouped.columns = ["device_name", "timestamp", "avg_power_kw"]
-    grouped["energy_kwh"] = grouped["avg_power_kw"] * (
-        pd.Timedelta(bucket).total_seconds() / 3600
-    )
+    grouped["energy_kwh"] = grouped["avg_power_kw"] * (pd.Timedelta(bucket).total_seconds() / 3600)
     grouped["timestamp"] = grouped["timestamp"].dt.strftime("%Y-%m-%dT%H:%M:%SZ")
     grouped["avg_power_kw"] = grouped["avg_power_kw"].round(3)
     grouped["energy_kwh"] = grouped["energy_kwh"].round(4)

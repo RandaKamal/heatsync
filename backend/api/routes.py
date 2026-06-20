@@ -1,11 +1,14 @@
-from flask import Blueprint, jsonify, request
-from api.weather import fetch_forecast, fetch_current, DEFAULT_LAT, DEFAULT_LON
-import loader
-import impact.calculator as impact
-import prediction.predictor as predictor
-import anomaly.detector as detector
-import control.controller as controller
+from datetime import datetime
+
 import comfort.model as comfort
+import impact.calculator as impact
+import loader
+from anomaly import detector
+from control import controller
+from flask import Blueprint, Response, jsonify, request
+from prediction import predictor
+
+from api.weather import DEFAULT_LAT, DEFAULT_LON, fetch_current, fetch_forecast
 
 api_bp = Blueprint("api", __name__, url_prefix="/api")
 
@@ -14,21 +17,24 @@ SPACE_ID = "3dbed10b-9e88-4163-916d-3182e2ecc69f"
 
 # ── helpers ──────────────────────────────────────────────────────────────────
 
-def _err(msg: str, code: int = 400):
+
+def _err(msg: str, code: int = 400) -> tuple[Response, int]:
     return jsonify({"error": msg}), code
 
 
 # ── health ────────────────────────────────────────────────────────────────────
 
+
 @api_bp.get("/health")
-def health():
+def health() -> Response:
     return jsonify({"status": "ok"})
 
 
 # ── weather ───────────────────────────────────────────────────────────────────
 
+
 @api_bp.get("/weather/forecast")
-def weather_forecast():
+def weather_forecast() -> Response:
     """7-day hourly + daily forecast. Query: lat, lon, days (1-16)."""
     lat = float(request.args.get("lat", DEFAULT_LAT))
     lon = float(request.args.get("lon", DEFAULT_LON))
@@ -37,7 +43,7 @@ def weather_forecast():
 
 
 @api_bp.get("/weather/current")
-def weather_current():
+def weather_current() -> Response:
     """Current conditions (nearest forecast hour to now)."""
     lat = float(request.args.get("lat", DEFAULT_LAT))
     lon = float(request.args.get("lon", DEFAULT_LON))
@@ -46,8 +52,9 @@ def weather_current():
 
 # ── devices ───────────────────────────────────────────────────────────────────
 
+
 @api_bp.get("/devices")
-def list_devices():
+def list_devices() -> Response:
     """All devices with 3-D position and latest snapshot per window."""
     devs = loader.devices().to_dict(orient="records")
     positions = controller.DEVICE_POSITIONS
@@ -58,7 +65,7 @@ def list_devices():
 
 
 @api_bp.get("/devices/<device_id>/snapshots")
-def device_snapshots(device_id: str):
+def device_snapshots(device_id: str) -> Response | tuple[Response, int]:
     """
     Recent snapshots for a device.
     Query: window (heating|cooling), limit (default 100)
@@ -79,7 +86,7 @@ def device_snapshots(device_id: str):
 
 
 @api_bp.get("/devices/<device_id>/power")
-def device_power(device_id: str):
+def device_power(device_id: str) -> Response | tuple[Response, int]:
     """
     Power draw history for a single device.
     Query: window (heating|cooling), bucket (15min|1h|1D)
@@ -102,8 +109,9 @@ def device_power(device_id: str):
 
 # ── spaces / events ───────────────────────────────────────────────────────────
 
+
 @api_bp.get("/spaces/events")
-def space_events_all():
+def space_events_all() -> Response:
     """All scheduled space events across both windows."""
     result = {}
     for window in ("heating", "cooling"):
@@ -116,8 +124,9 @@ def space_events_all():
 
 # ── impact ────────────────────────────────────────────────────────────────────
 
+
 @api_bp.get("/impact/summary")
-def impact_summary():
+def impact_summary() -> Response:
     """
     Energy saved (kWh), cost saved (€), CO2 saved (kg) — both windows + total.
     """
@@ -125,13 +134,13 @@ def impact_summary():
 
 
 @api_bp.get("/impact/by-device")
-def impact_by_device():
+def impact_by_device() -> Response:
     """Per-device savings breakdown."""
     return jsonify(impact.by_device())
 
 
 @api_bp.get("/impact/timeline")
-def impact_timeline():
+def impact_timeline() -> Response | tuple[Response, int]:
     """
     Time-series power consumption for charts.
     Query: window (heating|cooling), bucket (15min|1h|1D, default 1h)
@@ -145,14 +154,15 @@ def impact_timeline():
 
 # ── control ───────────────────────────────────────────────────────────────────
 
+
 @api_bp.get("/control/status")
-def control_status():
+def control_status() -> Response:
     """Current HVAC control state including all device overrides."""
     return jsonify(controller.get_status())
 
 
 @api_bp.post("/control/mode")
-def control_mode():
+def control_mode() -> Response | tuple[Response, int]:
     """
     Set global HVAC mode.
     Body: {"mode": "AUTO"|"HEAT"|"COOL"|"OFF"}
@@ -168,7 +178,7 @@ def control_mode():
 
 
 @api_bp.post("/control/setpoint")
-def control_setpoint():
+def control_setpoint() -> Response | tuple[Response, int]:
     """
     Set global temperature setpoint.
     Body: {"temperature": 21.0}
@@ -184,7 +194,7 @@ def control_setpoint():
 
 
 @api_bp.post("/control/device/<device_id>/toggle")
-def control_device_toggle(device_id: str):
+def control_device_toggle(device_id: str) -> Response | tuple[Response, int]:
     """
     Enable or disable a specific device.
     Body: {"enabled": true|false}
@@ -200,7 +210,7 @@ def control_device_toggle(device_id: str):
 
 
 @api_bp.post("/control/device/<device_id>/setpoint")
-def control_device_setpoint(device_id: str):
+def control_device_setpoint(device_id: str) -> Response | tuple[Response, int]:
     """
     Set per-device temperature override. Pass null to clear override.
     Body: {"temperature": 20.0}  or  {"temperature": null}
@@ -215,7 +225,7 @@ def control_device_setpoint(device_id: str):
 
 
 @api_bp.post("/control/prediction")
-def control_prediction():
+def control_prediction() -> Response | tuple[Response, int]:
     """
     Enable or disable automatic predictive scheduling.
     Body: {"enabled": true|false}
@@ -229,8 +239,9 @@ def control_prediction():
 
 # ── prediction ────────────────────────────────────────────────────────────────
 
+
 @api_bp.get("/prediction/schedule")
-def prediction_schedule():
+def prediction_schedule() -> Response:
     """
     Recommended start times for all upcoming events in the next 7 days,
     based on weather forecast and historical heating/cooling rates.
@@ -241,7 +252,7 @@ def prediction_schedule():
 
 
 @api_bp.get("/prediction/preheat")
-def prediction_preheat():
+def prediction_preheat() -> Response:
     """Should a preheat/precool action start right now?"""
     lat = float(request.args.get("lat", DEFAULT_LAT))
     lon = float(request.args.get("lon", DEFAULT_LON))
@@ -250,8 +261,9 @@ def prediction_preheat():
 
 # ── comfort ───────────────────────────────────────────────────────────────────
 
+
 @api_bp.get("/comfort/current")
-def comfort_current():
+def comfort_current() -> Response:
     """
     Live thermal comfort snapshot using latest sensor data from the most
     recent device snapshot (or explicit query params for demo use).
@@ -270,10 +282,10 @@ def comfort_current():
         latest = snap.sort_values("last_seen_at").iloc[-1]
         default_ta = float(latest.get("status_temperature_in_celsius", 21.0))
         default_rh = float(latest.get("status_humidity_in_percent", 45.0))
-    except Exception:
-        pass
+    except (IndexError, KeyError, TypeError, ValueError):
+        default_ta = 21.0
+        default_rh = 45.0
 
-    from datetime import datetime
     month = datetime.now().month
     ta = float(request.args.get("ta", default_ta))
     rh = float(request.args.get("rh", default_rh))
@@ -283,27 +295,28 @@ def comfort_current():
 
 
 @api_bp.get("/comfort/setpoint")
-def comfort_setpoint_for_month():
+def comfort_setpoint_for_month() -> Response:
     """
     Seasonal comfort setpoint for a given month and occupancy.
     Query: month (1-12, default current), occupancy (int, default 0)
     """
-    from datetime import datetime
     month = int(request.args.get("month", datetime.now().month))
     occ = int(request.args.get("occupancy", 0))
-    return jsonify({
-        "month": month,
-        "occupancy": occ,
-        "clothing_insulation_clo": comfort.seasonal_clo(month),
-        "comfort_setpoint_celsius": comfort.comfort_setpoint(month, occ),
-        "mold_absolute_min_celsius": comfort.MOLD_ABSOLUTE_MIN_CELSIUS,
-        "mold_safe_min_celsius": comfort.MOLD_SAFE_MIN_CELSIUS,
-        "max_event_power_fraction": comfort.MAX_EVENT_POWER_FRACTION,
-    })
+    return jsonify(
+        {
+            "month": month,
+            "occupancy": occ,
+            "clothing_insulation_clo": comfort.seasonal_clo(month),
+            "comfort_setpoint_celsius": comfort.comfort_setpoint(month, occ),
+            "mold_absolute_min_celsius": comfort.MOLD_ABSOLUTE_MIN_CELSIUS,
+            "mold_safe_min_celsius": comfort.MOLD_SAFE_MIN_CELSIUS,
+            "max_event_power_fraction": comfort.MAX_EVENT_POWER_FRACTION,
+        }
+    )
 
 
 @api_bp.get("/comfort/holidays")
-def comfort_holidays():
+def comfort_holidays() -> Response:
     """
     Bayern public holidays in the next N days (no occupancy → unoccupied setpoint).
     Query: days (default 60)
@@ -314,8 +327,9 @@ def comfort_holidays():
 
 # ── anomaly ───────────────────────────────────────────────────────────────────
 
+
 @api_bp.get("/anomaly/alerts")
-def anomaly_alerts():
+def anomaly_alerts() -> Response | tuple[Response, int]:
     """
     All detected anomalies.
     Query: window (heating|cooling, default heating)

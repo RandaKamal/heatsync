@@ -3,15 +3,17 @@ Weather forecast service using Open-Meteo (free, no API key required).
 Location: Ottobrunn-Taufkirchen, Munich area — TUM Aerospace & Geodesy Campus.
 """
 
+from datetime import UTC, datetime
+
 import requests
-from datetime import datetime, timezone
-from typing import Optional
 
 OPEN_METEO_URL = "https://api.open-meteo.com/v1/forecast"
 
 # TUM Aerospace & Geodesy Campus, Ottobrunn-Taufkirchen
 DEFAULT_LAT = 48.063
 DEFAULT_LON = 11.663
+HEATING_LIKELY_THRESHOLD_CELSIUS = 16.0
+COOLING_LIKELY_THRESHOLD_CELSIUS = 24.0
 
 HOURLY_VARS = [
     "temperature_2m",
@@ -37,7 +39,7 @@ DAILY_VARS = [
 
 
 def fetch_forecast(lat: float = DEFAULT_LAT, lon: float = DEFAULT_LON, days: int = 7) -> dict:
-    params = {
+    params: dict[str, str | int | float] = {
         "latitude": lat,
         "longitude": lon,
         "hourly": ",".join(HOURLY_VARS),
@@ -59,21 +61,19 @@ def fetch_forecast(lat: float = DEFAULT_LAT, lon: float = DEFAULT_LON, days: int
         },
         "hourly": _parse_hourly(raw["hourly"]),
         "daily": _parse_daily(raw["daily"]),
-        "fetched_at": datetime.now(timezone.utc).isoformat(),
+        "fetched_at": datetime.now(UTC).isoformat(),
     }
 
 
 def fetch_current(lat: float = DEFAULT_LAT, lon: float = DEFAULT_LON) -> dict:
     """Return only the forecast hour closest to now."""
     forecast = fetch_forecast(lat, lon, days=1)
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     hourly = forecast["hourly"]
 
     closest = min(
         hourly,
-        key=lambda h: abs(
-            datetime.fromisoformat(h["time"]).replace(tzinfo=timezone.utc) - now
-        ),
+        key=lambda h: abs(datetime.fromisoformat(h["time"]).replace(tzinfo=UTC) - now),
     )
     return {
         "location": forecast["location"],
@@ -107,7 +107,7 @@ def _parse_daily(raw: dict) -> list[dict]:
     return rows
 
 
-def _safe(lst: Optional[list], i: int):
+def _safe(lst: list[object] | None, i: int) -> object | None:
     if lst is None or i >= len(lst):
         return None
     return lst[i]
@@ -116,17 +116,17 @@ def _safe(lst: Optional[list], i: int):
 def _heating_likely(hour: dict) -> bool:
     """Outside temp low enough that the space will need heating toward the 21 °C event setpoint."""
     temp = hour.get("temperature_2m")
-    if temp is None:
+    if not isinstance(temp, int | float):
         return False
-    return temp < 16.0
+    return float(temp) < HEATING_LIKELY_THRESHOLD_CELSIUS
 
 
 def _cooling_likely(hour: dict) -> bool:
     """Outside temp high enough that the space will need active cooling to stay at 21 °C."""
     temp = hour.get("temperature_2m")
-    if temp is None:
+    if not isinstance(temp, int | float):
         return False
-    return temp > 24.0
+    return float(temp) > COOLING_LIKELY_THRESHOLD_CELSIUS
 
 
 def _hvac_mode(hour: dict) -> str:

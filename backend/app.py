@@ -1,6 +1,6 @@
-from flask import Flask, jsonify
-from flask_cors import CORS
 from api.routes import api_bp
+from flask import Flask, Response, jsonify
+from flask_cors import CORS
 
 
 def create_app() -> Flask:
@@ -9,11 +9,11 @@ def create_app() -> Flask:
     app.register_blueprint(api_bp)
 
     @app.errorhandler(404)
-    def not_found(e):
+    def not_found(e: Exception) -> tuple[Response, int]:
         return jsonify({"error": "Not found"}), 404
 
     @app.errorhandler(500)
-    def server_error(e):
+    def server_error(e: Exception) -> tuple[Response, int]:
         return jsonify({"error": "Internal server error", "detail": str(e)}), 500
 
     return app
@@ -21,4 +21,4 @@ def create_app() -> Flask:
 
 if __name__ == "__main__":
     app = create_app()
-    app.run(debug=True, port=5001)
+    app.run(debug=False, port=5001)

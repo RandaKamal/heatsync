@@ -10,10 +10,10 @@ Covers:
   6. Bayern public holidays — no occupancy on Feiertage → keep at unoccupied setpoint
 
 ISO 7730 clothing insulation (clo) by season:
-  Winter  (Dec–Feb) : 1.0 clo  heavy trousers, sweater, indoor jacket
-  Spring  (Mar–May) : 0.7 clo  light trousers, long-sleeve shirt
-  Summer  (Jun–Aug) : 0.5 clo  light trousers, short-sleeve shirt
-  Autumn  (Sep–Nov) : 0.7 clo  same as spring
+  Winter  (Dec-Feb) : 1.0 clo  heavy trousers, sweater, indoor jacket
+  Spring  (Mar-May) : 0.7 clo  light trousers, long-sleeve shirt
+  Summer  (Jun-Aug) : 0.5 clo  light trousers, short-sleeve shirt
+  Autumn  (Sep-Nov) : 0.7 clo  same as spring
 
 Comfort operative temperature for PMV ≈ 0 (by season, 1.2 met seated):
   Winter  : 20 °C
@@ -31,22 +31,25 @@ Noise limit:
 
 Occupancy effect on setpoint:
   Each person generates ~80 W of sensible heat.
-  50 occupants ≈ 4 kW, enough to raise a mid-size room by ~0.5–1 °C.
+  50 occupants ≈ 4 kW, enough to raise a mid-size room by ~0.5-1 °C.
   We lower the heating setpoint (or raise the cooling setpoint) proportionally,
   capped at 1.5 °C adjustment for any occupancy.
 """
 
 import math
 from datetime import date, timedelta
-from typing import Optional
 
 # ── constants ─────────────────────────────────────────────────────────────────
 
-MOLD_ABSOLUTE_MIN_CELSIUS = 12.0   # hard floor — never go below this
-MOLD_SAFE_MIN_CELSIUS = 14.0       # recommended unoccupied minimum
+MOLD_ABSOLUTE_MIN_CELSIUS = 12.0  # hard floor — never go below this
+MOLD_SAFE_MIN_CELSIUS = 14.0  # recommended unoccupied minimum
 
-MAX_EVENT_POWER_FRACTION = 0.60    # noise ceiling during occupied events
-MAX_OCCUPANCY_SETPOINT_ADJ = 1.5   # °C max setpoint shift from body heat
+MAX_EVENT_POWER_FRACTION = 0.60  # noise ceiling during occupied events
+MAX_OCCUPANCY_SETPOINT_ADJ = 1.5  # °C max setpoint shift from body heat
+_FCL_ICL_THRESHOLD = 0.078
+_PMV_CONVERGENCE_TOLERANCE = 0.001
+_PMV_COOL_THRESHOLD = -0.5
+_PMV_WARM_THRESHOLD = 0.5
 
 # Seasonal clo values (ISO 7730 / ASHRAE 55)
 _CLO_BY_SEASON = {
@@ -88,18 +91,19 @@ def comfort_setpoint(month: int, occupancy: int = 0) -> float:
     base = _COMFORT_TEMP_BY_SEASON[_season(month)]
     # 100 occupants → full MAX_OCCUPANCY_SETPOINT_ADJ reduction
     adj = min(occupancy / 100.0, 1.0) * MAX_OCCUPANCY_SETPOINT_ADJ
-    return round(base - adj, 1)   # lower setpoint = less energy needed
+    return round(base - adj, 1)  # lower setpoint = less energy needed
 
 
 # ── PMV / PPD (ISO 7730 Fanger model) ────────────────────────────────────────
 
+
 def pmv(
-    ta: float,          # air temperature (°C)
-    tr: float,          # mean radiant temperature (°C) — use ta when unknown
-    vel: float,         # relative air velocity (m/s)
-    rh: float,          # relative humidity (%)
-    met: float = 1.2,   # metabolic rate (met); 1.2 = seated lecture
-    clo: float = 0.7,   # clothing insulation (clo)
+    ta: float,  # air temperature (°C)
+    tr: float,  # mean radiant temperature (°C) — use ta when unknown
+    vel: float,  # relative air velocity (m/s)
+    rh: float,  # relative humidity (%)
+    met: float = 1.2,  # metabolic rate (met); 1.2 = seated lecture
+    clo: float = 0.7,  # clothing insulation (clo)
 ) -> float:
     """
     ISO 7730 Predicted Mean Vote.
@@ -109,10 +113,10 @@ def pmv(
       +1 = slightly warm, +2 = warm, +3 = hot
     """
     pa = rh * 10 * math.exp(16.6536 - 4030.18 / (ta + 235))  # water vapour (Pa)
-    icl = 0.155 * clo                                           # m²K/W
-    m = met * 58.15                                             # W/m²
-    mw = m                                                      # (no external work)
-    fcl = 1.05 + 0.645 * icl if icl > 0.078 else 1 + 1.29 * icl
+    icl = 0.155 * clo  # m²K/W
+    m = met * 58.15  # W/m²
+    mw = m  # (no external work)
+    fcl = 1.05 + 0.645 * icl if icl > _FCL_ICL_THRESHOLD else 1 + 1.29 * icl
 
     hcf = 12.1 * math.sqrt(vel)
 
@@ -122,10 +126,12 @@ def pmv(
     hc = hcf  # will be updated each iteration
     for _ in range(150):
         hc = max(hcf, 2.38 * abs(tcla - ta) ** 0.25)
-        tcl_new = (35.7 - 0.028 * mw
-                   - icl * (3.96e-8 * fcl * ((tcla + 273) ** 4 - (tr + 273) ** 4)
-                             + fcl * hc * (tcla - ta)))
-        if abs(tcl_new - tcla) < 0.001:
+        tcl_new = (
+            35.7
+            - 0.028 * mw
+            - icl * (3.96e-8 * fcl * ((tcla + 273) ** 4 - (tr + 273) ** 4) + fcl * hc * (tcla - ta))
+        )
+        if abs(tcl_new - tcla) < _PMV_CONVERGENCE_TOLERANCE:
             tcla = tcl_new
             break
         tcla = (tcla + tcl_new) / 2
@@ -145,9 +151,7 @@ def pmv(
 
 def ppd(pmv_val: float) -> float:
     """ISO 7730 Predicted Percentage Dissatisfied (%)."""
-    return round(
-        100 - 95 * math.exp(-0.03353 * pmv_val ** 4 - 0.2179 * pmv_val ** 2), 1
-    )
+    return round(100 - 95 * math.exp(-0.03353 * pmv_val**4 - 0.2179 * pmv_val**2), 1)
 
 
 def comfort_label(pmv_val: float) -> str:
@@ -155,9 +159,9 @@ def comfort_label(pmv_val: float) -> str:
         (-2.5, "cold"),
         (-1.5, "cool"),
         (-0.5, "slightly cool"),
-        (0.5,  "neutral"),
-        (1.5,  "slightly warm"),
-        (2.5,  "warm"),
+        (0.5, "neutral"),
+        (1.5, "slightly warm"),
+        (2.5, "warm"),
     ]
     for limit, label in thresholds:
         if pmv_val < limit:
@@ -196,12 +200,12 @@ def comfort_status(
             f"WARNING: Room temperature {ta}°C is below recommended mold-safe "
             f"minimum ({MOLD_SAFE_MIN_CELSIUS}°C)."
         )
-    if pmv_val < -0.5:
+    if pmv_val < _PMV_COOL_THRESHOLD:
         recommendations.append(
             f"Room is {comfort_label(pmv_val)} (PMV={pmv_val}). "
             f"Increase temperature toward {target}°C."
         )
-    elif pmv_val > 0.5:
+    elif pmv_val > _PMV_WARM_THRESHOLD:
         recommendations.append(
             f"Room is {comfort_label(pmv_val)} (PMV={pmv_val}). "
             f"Decrease temperature toward {target}°C."
@@ -230,6 +234,7 @@ def comfort_status(
 
 # ── Bayern public holidays ────────────────────────────────────────────────────
 
+
 def _easter(year: int) -> date:
     """Anonymous Gregorian algorithm (Meeus/Jones/Butcher)."""
     a = year % 19
@@ -248,9 +253,9 @@ def _easter(year: int) -> date:
 def _bavaria_holidays(year: int) -> dict[date, str]:
     easter = _easter(year)
     fixed = {
-        date(year, 1, 1):  "Neujahr",
-        date(year, 1, 6):  "Heilige Drei Könige",
-        date(year, 5, 1):  "Tag der Arbeit",
+        date(year, 1, 1): "Neujahr",
+        date(year, 1, 6): "Heilige Drei Könige",
+        date(year, 5, 1): "Tag der Arbeit",
         date(year, 8, 15): "Mariä Himmelfahrt",
         date(year, 10, 3): "Tag der Deutschen Einheit",
         date(year, 11, 1): "Allerheiligen",
@@ -258,8 +263,8 @@ def _bavaria_holidays(year: int) -> dict[date, str]:
         date(year, 12, 26): "2. Weihnachtstag",
     }
     variable = {
-        easter - timedelta(days=2):  "Karfreitag",
-        easter + timedelta(days=1):  "Ostermontag",
+        easter - timedelta(days=2): "Karfreitag",
+        easter + timedelta(days=1): "Ostermontag",
         easter + timedelta(days=39): "Christi Himmelfahrt",
         easter + timedelta(days=50): "Pfingstmontag",
         easter + timedelta(days=60): "Fronleichnam",
@@ -267,7 +272,7 @@ def _bavaria_holidays(year: int) -> dict[date, str]:
     return {**fixed, **variable}
 
 
-def is_holiday_bavaria(d: date) -> Optional[str]:
+def is_holiday_bavaria(d: date) -> str | None:
     """Returns the holiday name if d is a Bayern Feiertag, else None."""
     return _bavaria_holidays(d.year).get(d)
 
