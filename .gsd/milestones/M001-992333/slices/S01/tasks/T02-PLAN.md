@@ -22,7 +22,3 @@ Create backend/notebooks/utils.py with functions for loading CSVs, aligning to 1
 ## Verification
 
 uv run --project backend python -m py_compile backend/notebooks/utils.py && uv run --project backend ruff check backend/notebooks/utils.py
-
-## Observability Impact
-
-Log dimensions and null counts of preprocessed dataframes.

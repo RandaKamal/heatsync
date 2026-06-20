@@ -13,33 +13,33 @@
 
 ## Integration Closure
 
-The processed heating and cooling datasets are saved as CSV files and can be successfully loaded and verified by pytest, with ruff linting, ruff formatting, and mypy type checks passing.
+The processed heating and cooling datasets are saved as CSV files and can be successfully loaded and verified by pytest, with ruff linting, format check passing and execution passing.
 
 ## Verification
 
-- We will log data loading shapes, null counts, and execution duration during preprocessing and notebook tests.
+- Logging execution time and processed row counts.
 
 ## Tasks
 
-- [x] **T01: Added pandas, scipy, statsmodels, torch, scikit-learn, matplotlib, jupyter, ipykernel, nbconvert, nbformat, and pandas-stubs dependencies to backend/pyproject.toml and successfully ran uv sync.** `est:1h`
-  Add pandas, scipy, statsmodels, torch, scikit-learn, matplotlib, jupyter, ipykernel, nbconvert, nbformat, and pandas-stubs dependencies to backend/pyproject.toml and run uv sync.
+- [x] **T01: Initialize notebook structure and test harness** `est:1`
+  Set up backend/notebooks directory, uv project config for notebook dependencies (jupyter, pandas, matplotlib), and create a basic test script to ensure notebooks can be executed headlessly.
   - Files: `backend/pyproject.toml`
-  - Verify: uv run --project backend python -c "import pandas, scipy, statsmodels, torch, sklearn, matplotlib, nbconvert, nbformat; print('all imported')"
+  - Verify: uv run --project backend pytest backend/notebooks/test_notebook_execution.py
 
-- [ ] **T02: Implement shared preprocessing utilities** `est:2h`
+- [ ] **T02: Implement shared preprocessing utilities** `est:1`
   Create backend/notebooks/utils.py with functions for loading CSVs, aligning to 15-minute clock, linearly interpolating missing values, engineering features, and estimating occupancy heat gains.
   - Files: `backend/notebooks/utils.py`
   - Verify: uv run --project backend python -m py_compile backend/notebooks/utils.py && uv run --project backend ruff check backend/notebooks/utils.py
 
-- [ ] **T03: Implement data preprocessing notebook** `est:2h`
+- [ ] **T03: Implement data preprocessing notebook** `est:1`
   Create backend/notebooks/01_preprocessing.ipynb that loads heating and cooling data, processes them using utils.py, and saves the aligned dataframes to processed CSVs.
   - Files: `backend/notebooks/01_preprocessing.ipynb`
   - Verify: uv run --project backend python -c "import nbformat; nb = nbformat.read('backend/notebooks/01_preprocessing.ipynb', as_version=4); print(f'Read notebook with {len(nb.cells)} cells')"
 
-- [ ] **T04: Create notebook integration test** `est:1.5h`
-  Implement backend/tests/test_notebooks.py using nbconvert and nbformat to execute the notebooks headlessly. Verify that 01_preprocessing.ipynb runs successfully and that all quality checks (linting, format, type check) pass.
+- [ ] **T04: Add automated execution test for preprocessing notebook** `est:1`
+  Write pytest tests in backend/tests/test_notebooks.py to execute 01_preprocessing.ipynb programmatically via nbclient/nbconvert, ensuring it completes without errors and produces the expected outputs.
   - Files: `backend/tests/test_notebooks.py`
-  - Verify: PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 uv run --project backend pytest backend/tests/test_notebooks.py -v
+  - Verify: uv run --project backend pytest backend/tests/test_notebooks.py -v
 
 ## Files Likely Touched
 

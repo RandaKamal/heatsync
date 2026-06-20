@@ -4,18 +4,18 @@ estimated_files: 1
 skills_used: []
 ---
 
-# T01: Added pandas, scipy, statsmodels, torch, scikit-learn, matplotlib, jupyter, ipykernel, nbconvert, nbformat, and pandas-stubs dependencies to backend/pyproject.toml and successfully ran uv sync.
+# T01: Initialize notebook structure and test harness
 
-Add pandas, scipy, statsmodels, torch, scikit-learn, matplotlib, jupyter, ipykernel, nbconvert, nbformat, and pandas-stubs dependencies to backend/pyproject.toml and run uv sync.
+Set up backend/notebooks directory, uv project config for notebook dependencies (jupyter, pandas, matplotlib), and create a basic test script to ensure notebooks can be executed headlessly.
 
 ## Inputs
 
-- `backend/pyproject.toml`
+- None specified.
 
 ## Expected Output
 
-- `backend/pyproject.toml`
+- `backend/notebooks/test_notebook_execution.py`
 
 ## Verification
 
-uv run --project backend python -c "import pandas, scipy, statsmodels, torch, sklearn, matplotlib, nbconvert, nbformat; print('all imported')"
+uv run --project backend pytest backend/notebooks/test_notebook_execution.py

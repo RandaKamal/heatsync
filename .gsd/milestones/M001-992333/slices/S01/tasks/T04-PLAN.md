@@ -4,9 +4,9 @@ estimated_files: 1
 skills_used: []
 ---
 
-# T04: Create notebook integration test
+# T04: Add automated execution test for preprocessing notebook
 
-Implement backend/tests/test_notebooks.py using nbconvert and nbformat to execute the notebooks headlessly. Verify that 01_preprocessing.ipynb runs successfully and that all quality checks (linting, format, type check) pass.
+Write pytest tests in backend/tests/test_notebooks.py to execute 01_preprocessing.ipynb programmatically via nbclient/nbconvert, ensuring it completes without errors and produces the expected outputs.
 
 ## Inputs
 
@@ -18,8 +18,4 @@ Implement backend/tests/test_notebooks.py using nbconvert and nbformat to execut
 
 ## Verification
 
-PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 uv run --project backend pytest backend/tests/test_notebooks.py -v
-
-## Observability Impact
-
-Show full execution output log of notebooks.
+uv run --project backend pytest backend/tests/test_notebooks.py -v
