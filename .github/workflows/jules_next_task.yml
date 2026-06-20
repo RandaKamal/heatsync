@@ -22,7 +22,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Resolve next GSD slice ready for implementation
+      - name: Resolve next GSD slice not marked finished
         id: gsd_slice
         run: |
           set -euo pipefail
@@ -82,7 +82,7 @@ jobs:
 
           if has_selected_slice:
               slice_ref = f"{milestone}/{slice_id}"
-              selection_summary = f"""This GitHub Actions run already resolved exactly one GSD slice that has local research, planning, and task artifacts and is ready for implementation:
+              selection_summary = f"""This GitHub Actions run already resolved exactly one GSD slice that is not marked finished:
           - Milestone: {milestone}
           - Slice: {slice_id}: {slice_title}
           - Slice directory: {slice_dir}
@@ -91,8 +91,8 @@ jobs:
               selection_instruction = (
                   f"FIRST PRIORITY: implement the selected slice `{slice_ref}` exactly as described in `.gsd` Markdown. "
                   "Treat `.gsd/STATE.md`, `.gsd/QUEUE.md`, the selected milestone roadmap, and the selected slice "
-                  "plan/context/task files as the execution source of truth. The selected slice directory may contain "
-                  "`tasks/T*-PLAN.md` files; use those task files as the implementation skeleton for the slice."
+                  "plan/context/task files as the execution source of truth. If the selected slice directory contains "
+                  "`tasks/T*-PLAN.md` files, use those task files as the implementation skeleton for the slice."
               )
               scope_instruction = (
                   f"One Jules task/session may implement only one slice. Do not start, complete, mark complete, "
@@ -102,8 +102,16 @@ jobs:
               plan_instruction = (
                   f"Execute the unfinished implementation tasks for `{slice_ref}` using existing task plans and checklist items. "
                   "When implementation work exists, do not stop after only changing `.gsd` state, gates, research, or plan files. "
-                  "If the selected slice genuinely lacks executable task plans, create the minimum missing plan artifact and "
-                  "stop without marking the slice complete; otherwise implement and verify the slice."
+                  "If the selected slice lacks executable task plans, create the minimum missing plan artifact and implement "
+                  "from the available roadmap/context when enough context exists. Stop without marking the slice complete "
+                  "only when implementation cannot be completed or verified."
+              )
+              completion_instruction = (
+                  f"When `{slice_ref}` is fully implemented and verified, mark the slice itself finished in "
+                  f"`{roadmap or 'the matching milestone roadmap'}` by changing its top-level checklist entry from "
+                  f"`- [ ] **{slice_id}:` to `- [x] **{slice_id}:`. Also mark completed task checklist items and "
+                  "add concise task or slice summary evidence. If any part of the selected slice remains incomplete "
+                  "or unverified, leave the slice unchecked."
               )
               discovery_instruction = (
                   "If the selected slice is already implemented after checkout, stop without opening a PR. "
@@ -139,17 +147,16 @@ jobs:
               strict_scope = f"`{slice_ref}`"
           else:
               slice_ref = "the single slice you select for implementation"
-              selection_summary = f"""This workflow was dispatched, and the preflight selector did not resolve an execution-ready GSD slice automatically.
+              selection_summary = f"""This workflow was dispatched, and the preflight selector did not resolve an unfinished GSD slice automatically.
           - Dispatch reason: {trigger_reason or 'manual or automation request'}
 
-          This dispatch is allowed, but it must still result in at most one locally researched/planned `.gsd` slice being implemented."""
+          This dispatch is allowed, but it must still result in at most one unfinished `.gsd` slice being implemented."""
               selection_instruction = (
                   "FIRST PRIORITY: inspect `.gsd` Markdown and select exactly one slice that is next in line, not yet "
-                  "implemented, and already has local research, a slice plan, and concrete task plan files. Prefer the active "
-                  "slice in `.gsd/STATE.md` if it is execution-ready; otherwise use the first unchecked `[ ]` execution-ready "
-                  "slice in the active milestone roadmap under `.gsd/milestones/`. Use `.gsd/QUEUE.md` only as supporting "
-                  "context for that one slice. The selected slice directory may contain `tasks/T*-PLAN.md` files; use "
-                  "those task files as the implementation skeleton for the slice."
+                  "marked finished. Prefer the active slice in `.gsd/STATE.md` if it is not marked finished; otherwise "
+                  "use the first unchecked `[ ]` slice in the active milestone roadmap under `.gsd/milestones/`. Use "
+                  "`.gsd/QUEUE.md` only as supporting context for that one slice. If the selected slice directory "
+                  "contains `tasks/T*-PLAN.md` files, use those task files as the implementation skeleton for the slice."
               )
               scope_instruction = (
                   "One Jules task/session may implement only one slice. After selecting the slice, do not start, "
@@ -159,11 +166,18 @@ jobs:
               plan_instruction = (
                   "Execute the unfinished implementation tasks for that one selected slice using existing task plans and checklist items. "
                   "When implementation work exists, do not stop after only changing `.gsd` state, gates, research, or plan files. "
-                  "If the selected slice genuinely lacks executable task plans, create the minimum missing plan artifact and "
-                  "stop without marking the slice complete; otherwise implement and verify the slice."
+                  "If the selected slice lacks executable task plans, create the minimum missing plan artifact and implement "
+                  "from the available roadmap/context when enough context exists. Stop without marking the slice complete "
+                  "only when implementation cannot be completed or verified."
+              )
+              completion_instruction = (
+                  "When the selected slice is fully implemented and verified, mark the slice itself finished in the "
+                  "matching milestone roadmap by changing its top-level checklist entry from `[ ]` to `[x]`. Also mark "
+                  "completed task checklist items and add concise task or slice summary evidence. If any part of the "
+                  "selected slice remains incomplete or unverified, leave the slice unchecked."
               )
               discovery_instruction = (
-                  "If no execution-ready `.gsd` slice can be confirmed after checkout, stop without opening a PR. "
+                  "If no unfinished `.gsd` slice can be confirmed after checkout, stop without opening a PR. "
                   "Do not invent maintenance work and do not switch to another slice."
               )
               outside_scope_instruction = (
@@ -208,7 +222,7 @@ jobs:
           4. {scope_instruction}
           5. {plan_instruction}
           6. Implement the selected slice as a narrow PR: source/test/docs changes required by the selected slice plus the minimal `.gsd` task-state evidence for this slice only.
-          7. Update relevant `.gsd` Markdown state for the selected slice. Mark only tasks and slice checklist entries that were actually implemented and verified. Do not mark unrelated tasks, requirements, or milestones complete.
+          7. {completion_instruction}
           8. {discovery_instruction}
           9. {outside_scope_instruction}
           10. {quality_instruction}
@@ -218,6 +232,7 @@ jobs:
           - Keep the PR strictly scoped to {strict_scope}. One Jules task equals one implementation slice maximum.
           - Do not open a planning-only PR when the selected slice has implementation work available.
           - Do not advance `.gsd/STATE.md`, add gates, or mark tasks complete unless the corresponding implementation and verification were actually done.
+          - When the selected slice is fully implemented and verified, its roadmap checkbox must be changed to `[x]`; if it is not fully implemented and verified, leave it `[ ]`.
           - Do not reorder `.gsd/QUEUE.md` or milestone roadmap items.
           - Do not mark unrelated tasks, slices, milestones, or requirements complete.
           - Preserve backend data-shape, generated-output, and dataset-safety contracts.

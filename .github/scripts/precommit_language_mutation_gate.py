@@ -156,7 +156,7 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     os.environ["PYTEST_DISABLE_PLUGIN_AUTOLOAD"] = "1"
-    os.environ["PYTHONPATH"] = ""
+    os.environ["PYTHONPATH"] = "backend"
 
     coverage_source = root / "build/slow-lane/.coverage"
     coverage_target = root / ".coverage"

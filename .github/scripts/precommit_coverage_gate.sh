@@ -16,5 +16,4 @@ fi
 mkdir -p build/slow-lane
 uv run --project backend coverage erase
 uv run --project backend coverage run -m pytest "${test_files[@]}" -q
-uv run --project backend coverage combine
 uv run --project backend coverage json -o build/slow-lane/coverage.json

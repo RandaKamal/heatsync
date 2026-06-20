@@ -77,27 +77,12 @@ def find_roadmap_slice(milestone_id, slice_id):
 def slice_dir(milestone_id, slice_id):
     return MILESTONES_ROOT / milestone_id / "slices" / slice_id
 
-def slice_ready_for_implementation(milestone_id, slice_id, completed_milestones):
+def slice_not_finished(milestone_id, slice_id, completed_milestones):
     if milestone_id in completed_milestones:
         return False
 
     roadmap_item = find_roadmap_slice(milestone_id, slice_id)
-    if roadmap_item is not None and roadmap_item["complete"]:
-        return False
-
-    directory = slice_dir(milestone_id, slice_id)
-    summary_file = directory / f"{slice_id}-SUMMARY.md"
-    research_file = directory / f"{slice_id}-RESEARCH.md"
-    plan_file = directory / f"{slice_id}-PLAN.md"
-    task_dir = directory / "tasks"
-
-    if summary_file.exists():
-        return False
-    if not research_file.exists() or not plan_file.exists():
-        return False
-    if not any(task_dir.glob("T*-PLAN.md")):
-        return False
-    return re.search(r"^\s*-\s*\[\s\]\s+\*\*T\d+:", read_text(plan_file), re.MULTILINE) is not None
+    return roadmap_item is None or not roadmap_item["complete"]
 
 def select_implementation_slice():
     state = parse_state()
@@ -105,7 +90,7 @@ def select_implementation_slice():
 
     active_milestone = state["milestone"]
     active_slice = state["slice"]
-    if active_milestone and active_slice and slice_ready_for_implementation(
+    if active_milestone and active_slice and slice_not_finished(
         active_milestone, active_slice, completed_milestones
     ):
         roadmap_item = find_roadmap_slice(active_milestone, active_slice) or {}
@@ -115,7 +100,7 @@ def select_implementation_slice():
             "slice_title": state["title"] or roadmap_item.get("title", ""),
             "slice_dir": str(slice_dir(active_milestone, active_slice)),
             "roadmap_file": roadmap_item.get("roadmap", ""),
-            "selection_reason": "active execution-ready slice in .gsd/STATE.md",
+            "selection_reason": "active slice not marked finished in .gsd/STATE.md",
         }
 
     active_roadmap = MILESTONES_ROOT / active_milestone / f"{active_milestone}-ROADMAP.md"
@@ -129,7 +114,7 @@ def select_implementation_slice():
         if milestone_id in completed_milestones:
             continue
         for item in parse_roadmap(path):
-            if not item["complete"] and slice_ready_for_implementation(
+            if not item["complete"] and slice_not_finished(
                 item["milestone"], item["slice"], completed_milestones
             ):
                 return {
@@ -138,21 +123,8 @@ def select_implementation_slice():
                     "slice_title": item["title"],
                     "slice_dir": str(slice_dir(item["milestone"], item["slice"])),
                     "roadmap_file": item["roadmap"],
-                    "selection_reason": "first unchecked execution-ready slice",
+                    "selection_reason": "first slice not marked finished in milestone roadmap",
                 }
-
-    for directory in sorted(MILESTONES_ROOT.glob("*/slices/S*")) if MILESTONES_ROOT.exists() else []:
-        milestone_id = directory.parents[1].name
-        slice_id = directory.name
-        if slice_ready_for_implementation(milestone_id, slice_id, completed_milestones):
-            return {
-                "milestone_id": milestone_id,
-                "slice_id": slice_id,
-                "slice_title": "",
-                "slice_dir": str(directory),
-                "roadmap_file": "",
-                "selection_reason": "slice directory with local task plans",
-            }
 
     return None
 
@@ -168,11 +140,11 @@ def main():
             roadmap_file="",
             selection_reason="",
         )
-        print("No execution-ready GSD slice found under .gsd.")
+        print("No unfinished GSD slice found under .gsd.")
     else:
         write_outputs(has_incomplete="true", **selected)
         print(
-            "Selected GSD slice ready for implementation: "
+            "Selected GSD slice not marked finished: "
             f"{selected['milestone_id']}/{selected['slice_id']} "
             f"{selected['slice_title']} ({selected['selection_reason']})"
         )
