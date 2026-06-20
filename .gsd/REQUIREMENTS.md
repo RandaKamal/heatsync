@@ -4,15 +4,6 @@ This file is the explicit capability and coverage contract for the project.
 
 ## Active
 
-### R001 — Load CSV datasets, align to 15-minute clock, impute missing values, and engineer time/weather/envelope features.
-- Class: core-capability
-- Status: active
-- Description: Load CSV datasets, align to 15-minute clock, impute missing values, and engineer time/weather/envelope features.
-- Why it matters: To provide a standardized clean dataset for all downstream models and calculations.
-- Source: user
-- Primary owning slice: M001-992333/S01
-- Validation: mapped
-
 ### R002 — Implement ARIMA/SARIMAX models to forecast indoor room temperatures.
 - Class: core-capability
 - Status: active
@@ -69,6 +60,15 @@ This file is the explicit capability and coverage contract for the project.
 
 ## Validated
 
+### R001 — Load CSV datasets, align to 15-minute clock, impute missing values, and engineer time/weather/envelope features.
+- Class: core-capability
+- Status: validated
+- Description: Load CSV datasets, align to 15-minute clock, impute missing values, and engineer time/weather/envelope features.
+- Why it matters: To provide a standardized clean dataset for all downstream models and calculations.
+- Source: user
+- Primary owning slice: M001-992333/S01
+- Validation: Validated in S01: backend/notebooks/utils.py loading, downsampling/alignment, interpolation tracking, weather/time/envelope feature engineering, and notebook execution (backend/notebooks/01_preprocessing.ipynb) passing programmatically via nbconvert with cached processed artifacts in backend/data/processed/.
+
 ## Deferred
 
 ## Out of Scope
@@ -77,7 +77,7 @@ This file is the explicit capability and coverage contract for the project.
 
 | ID | Class | Status | Primary owner | Supporting | Proof |
 |---|---|---|---|---|---|
-| R001 | core-capability | active | M001-992333/S01 | none | mapped |
+| R001 | core-capability | validated | M001-992333/S01 | none | Validated in S01: backend/notebooks/utils.py loading, downsampling/alignment, interpolation tracking, weather/time/envelope feature engineering, and notebook execution (backend/notebooks/01_preprocessing.ipynb) passing programmatically via nbconvert with cached processed artifacts in backend/data/processed/. |
 | R002 | core-capability | active | M001-992333/S02 | none | mapped |
 | R003 | core-capability | active | M001-992333/S03 | none | mapped |
 | R004 | core-capability | active | M001-992333/S04 | none | mapped |
@@ -87,7 +87,7 @@ This file is the explicit capability and coverage contract for the project.
 
 ## Coverage Summary
 
-- Active requirements: 7
-- Mapped to slices: 7
-- Validated: 0
+- Active requirements: 6
+- Mapped to slices: 6
+- Validated: 1 (R001)
 - Unmapped active requirements: 0

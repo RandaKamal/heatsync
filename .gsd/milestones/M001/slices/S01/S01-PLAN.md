@@ -36,7 +36,7 @@ S01 produces backend/notebooks/utils.py consumed by all downstream notebooks S02
   - Files: `backend/notebooks/01_preprocessing.ipynb`
   - Verify: uv run --project backend jupyter nbconvert --to notebook --execute backend/notebooks/01_preprocessing.ipynb --ExecutePreprocessor.timeout=120 --output /tmp/test_01_output.ipynb
 
-- [ ] **T04: Run quality gates and verify full slice integration** `est:30 min–1 hour`
+- [x] **T04: Verified the preprocessing utilities, tests, processed CSV artifacts, and notebook execution end-to-end, with backend pytest collection fixed for repository-root imports.** `est:30 min–1 hour`
   **Why:** Final verification ensures all artifacts pass project quality gates (ruff, mypy, bandit) and the full pipeline works end-to-end: utils.py loads data, notebook executes, tests pass, and processed artifacts exist.
   - Verify: uv run --project backend ruff check --config backend/pyproject.toml backend/notebooks/utils.py && uv run --project backend mypy --config-file backend/pyproject.toml backend/notebooks/utils.py && uv run --project backend pytest backend/tests/test_utils.py -v
 

@@ -13,10 +13,10 @@
 
 ## Slices
 
-- [ ] **S01: Data Preprocessing and Shared Utilities** `risk:low` `depends:[]`
+- [x] **S01: Data Preprocessing and Shared Utilities** `risk:low` `depends:[]`
   > After this: Reads raw CSVs from backend/data/ and outputs normalized 15-min aligned dataframes via utils.py; 01_preprocessing.ipynb renders clean output cells.
 
-- [ ] **S02: Statistical Temperature Forecasting (SARIMAX)** `[sketch]` `risk:low` `depends:[S01]`
+- [ ] **S02: Statistical Temperature Forecasting (SARIMAX)** `risk:low` `depends:[S01]`
   > After this: Runs 02_forecasting_sarimax.ipynb showing SARIMAX temperature forecast with RMSE and MAPE metrics logged in output cells.
 
 - [ ] **S03: LSTM and Two-Level Forecasting Models** `[sketch]` `risk:medium` `depends:[S01]`
