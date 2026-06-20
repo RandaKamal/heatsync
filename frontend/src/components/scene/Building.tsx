@@ -119,41 +119,7 @@ export function Building({
 
   return (
     <group>
-      <FloorSlab
-        y={0.08}
-        highlighted={
-          activeFloor === 'all' || activeFloor === 0
-        }
-      />
-
-      {(activeFloor === 'all' || activeFloor === 1) && (
-        <FloorSlab
-          y={1.72}
-          highlighted={
-            activeFloor === 'all' || activeFloor === 1
-          }
-        />
-      )}
-
-      {[
-        [-5.85, 1.65, -3.55],
-        [5.85, 1.65, -3.55],
-        [-5.85, 1.65, 3.35],
-        [5.85, 1.65, 3.35],
-      ].map(([x, y, z]) => (
-        <mesh
-          key={`${x}-${z}`}
-          position={[x, y, z]}
-          castShadow
-        >
-          <boxGeometry args={[0.15, 3.2, 0.15]} />
-          <meshStandardMaterial
-            color="#40536a"
-            metalness={0.35}
-            roughness={0.55}
-          />
-        </mesh>
-      ))}
+      <FloorSlab y={0.08} highlighted />
 
       <mesh position={[0, 0.76, 2.32]} receiveShadow>
         <boxGeometry args={[11.8, 1.28, 1]} />

@@ -369,17 +369,20 @@ def get_notifications():
 
 # ── Frontend aggregated status ─────────────────────────────────────────────────
 
-# 3-D positions match the React building layout exactly
-_ROOM_MAP = [
-    {"id": "wing-a",    "name": "Wing A",    "device_id": "bdaf0e14-2cd1-43c8-b9ea-b3c90309f773",
-     "position": [-16, 2, -8], "size": [14, 4, 12], "hp_id": "HP-A1", "hp_pos": [-16, 5.1, -8]},
-    {"id": "wing-b",    "name": "Wing B",    "device_id": "1c893f75-4599-4402-9d4c-1017aa858fa8",
-     "position": [0, 2, -8],   "size": [14, 4, 12], "hp_id": "HP-B1", "hp_pos": [0, 5.1, -8]},
-    {"id": "wing-c",    "name": "Wing C",    "device_id": "e72fea56-abe7-4d3f-a0ed-1e6b6c462157",
-     "position": [16, 2, -8],  "size": [14, 4, 12], "hp_id": "HP-C1", "hp_pos": [16, 5.1, -8]},
-    {"id": "main-hall", "name": "Main Hall", "device_id": "930f3621-05df-4574-9270-9d994c5b716c",
-     "position": [-16, 2, 8],  "size": [14, 4, 12], "hp_id": "HP-D1", "hp_pos": [-16, 5.1, 8]},
-]
+# All 4 devices share the same physical space (space_id 3dbed10b-…).
+# One room, four heat pumps.
+_ROOM_CFG = {
+    "id":       "main-space",
+    "name":     "Main Space",
+    "position": [0, 2, 0],
+    "size":     [60, 4, 12],
+    "devices": [
+        {"device_id": "bdaf0e14-2cd1-43c8-b9ea-b3c90309f773", "hp_id": "HP-1", "hp_pos": [-24, 5.1, 0]},
+        {"device_id": "1c893f75-4599-4402-9d4c-1017aa858fa8", "hp_id": "HP-2", "hp_pos": [-8,  5.1, 0]},
+        {"device_id": "e72fea56-abe7-4d3f-a0ed-1e6b6c462157", "hp_id": "HP-3", "hp_pos": [8,   5.1, 0]},
+        {"device_id": "930f3621-05df-4574-9270-9d994c5b716c", "hp_id": "HP-4", "hp_pos": [24,  5.1, 0]},
+    ],
+}
 
 _OFFLINE_ROOMS = [
     {"id": "hall-e",    "name": "Hall E",         "position": [0, 2, 8],  "size": [14, 4, 12]},
@@ -619,7 +622,7 @@ def _compute_advice(
 def frontend_status():
     """
     Single aggregated endpoint for the HeatSync 3-D UI.
-    Returns 4 device-backed rooms + 2 offline placeholders (6 total).
+    Returns 1 room with 4 heat pumps + 2 offline placeholder halls.
     """
     WINDOW = "cooling"  # most recent data window (2026-05-25 to 2026-05-31)
     INTERVAL_HOURS = 5 / 60   # power_draw: 5-minute samples
@@ -672,19 +675,27 @@ def frontend_status():
     active_units = 0
     alert_count  = 0
 
-    for cfg in _ROOM_MAP:
-        did       = cfg["device_id"]
+    # Global setpoint for the space
+    room_target = _safe_float(ctrl.get("setpoint_celsius"), 21.0)
+
+    # ── Collect per-device data, build heatPumps list ─────────────────────────
+    heat_pumps: list[dict] = []
+    all_room_temps:  list[float] = []
+    all_out_temps:   list[float] = []
+    combined_anomalies: list[dict] = []
+
+    for dev_cfg in _ROOM_CFG["devices"]:
+        did       = dev_cfg["device_id"]
         dev_snaps = df[df["device_id"] == did].sort_values("last_seen_at")
 
         if dev_snaps.empty:
-            rooms.append(_make_offline_room(cfg))
             continue
 
         latest = dev_snaps.iloc[-1]
         ctrl_d = ctrl_devs.get(did, {})
-        target = _safe_float(ctrl_d.get("setpoint_celsius", ctrl["setpoint_celsius"]), 21.0)
+        target = _safe_float(ctrl_d.get("setpoint_celsius", room_target), room_target)
 
-        # ── Unit status (§9 of integration guide) ────────────────────────────
+        # Unit status
         regs = str(latest.get("status_error_registers", "0,0,0,0")).strip()
         if not bool(latest.get("status_is_enabled", 1)):
             unit_st = "idle"
@@ -699,13 +710,11 @@ def frontend_status():
         else:
             unit_st = "idle"
 
-        room_st = "error" if unit_st == "error" else ("warning" if unit_st == "warning" else "optimal")
-
         total_units  += 1
         if unit_st == "active": active_units += 1
         if unit_st in ("warning", "error"): alert_count += 1
 
-        # ── Sensor readings ───────────────────────────────────────────────────
+        # Sensor readings
         temp_c    = _safe_float(latest.get("status_temperature_in_celsius"), 21.0)
         temp_sup  = _safe_float(latest.get("status_temperature_supply_in_celsius"), 35.0)
         temp_ret  = _safe_float(latest.get("status_temperature_return_in_celsius"), 20.0)
@@ -718,51 +727,112 @@ def frontend_status():
         raw_regs  = str(latest.get("status_error_registers", "0,0,0,0"))
         op_mode   = str(latest.get("status_operation_mode", "AUTO"))
 
-        # ── Current power ─────────────────────────────────────────────────────
+        all_room_temps.append(temp_c)
+        all_out_temps.append(temp_out)
+
+        # Current power (last hour average)
         dev_pwr = pwr[pwr["device_id"] == did]["power_draw_kw"]
         pwr_now = round(_safe_float(dev_pwr.tail(12).mean()), 2) if not dev_pwr.empty else 0.0
 
-        # ── Per-device energy savings (from actual power draw) ────────────────
-        actual_kwh = float(dev_pwr.sum()) * INTERVAL_HOURS
+        # Per-unit savings
+        actual_kwh    = float(dev_pwr.sum()) * INTERVAL_HOURS
         saved_kwh_dev = actual_kwh * IHL_SAVINGS_FACTOR
-        unit_savings = {
+        unit_savings  = {
             "kwh": round(saved_kwh_dev, 1),
             "co2": round(saved_kwh_dev * CO2_KG_PER_KWH, 1),
             "eur": round(saved_kwh_dev * EUR_PER_KWH, 2),
         }
 
-        # ── 24-hour temperature chart (15-min intervals → last 96 = 24 h) ────
-        dev_ivs = ivs[ivs["device_id"] == did].sort_values("interval_start_time")
+        # Per-unit anomalies (capped at 3 per device)
+        unit_anomalies: list[dict] = []
+        for a in alerts_by_dev.get(did, [])[:3]:
+            ts_str = str(a.get("timestamp", ""))
+            unit_anomalies.append({
+                "id":       f"{dev_cfg['hp_id']}-{a['type']}-{ts_str[:10]}",
+                "severity": "high" if a["severity"] == "critical" else a["severity"],
+                "type":     a["type"].replace("_", " ").title(),
+                "message":  a["message"],
+                "time":     ts_str[11:16] or "—",
+                "resolved": False,
+            })
+        combined_anomalies.extend(unit_anomalies)
 
-        # Outside temperature: resample snapshots to 15-min averages
-        indexed_snaps = dev_snaps.set_index("last_seen_at")
-        h_out = pd.to_numeric(
-            indexed_snaps.get("status_temperature_outside_in_celsius", pd.Series(dtype=float)),
+        heat_pumps.append({
+            "id":       dev_cfg["hp_id"],
+            "deviceId": did,
+            "name":     f"IMBAT Orion {dev_cfg['hp_id']}",
+            "model":    "ORIO-025",
+            "status":   unit_st,
+            "position": dev_cfg["hp_pos"],
+            "power":    {"current": pwr_now, "max": 25.0},
+            "runtime":  _uptime_str(uptime_s),
+            "mode":     op_mode,
+            "temperature": {"supply": round(temp_sup, 1), "return": round(temp_ret, 1)},
+            "airFlow":     {"supply": round(fan_sup, 1),  "return": round(fan_ret, 1)},
+            "humidity":    round(humidity, 1),
+            "co2Ppm":      round(co2_ppm, 0),
+            "rawErrorRegisters": raw_regs,
+            "savings":     unit_savings,
+            "anomalies":   unit_anomalies,
+        })
+
+    if not heat_pumps:
+        rooms.append(_make_offline_room({
+            "id": _ROOM_CFG["id"], "name": _ROOM_CFG["name"],
+            "position": _ROOM_CFG["position"], "size": _ROOM_CFG["size"],
+        }))
+    else:
+        # Room-level aggregates
+        avg_temp = round(sum(all_room_temps) / len(all_room_temps), 1)
+        avg_out  = round(sum(all_out_temps)  / len(all_out_temps),  1)
+
+        # Worst-case room status
+        _status_rank = {"error": 3, "warning": 2, "active": 1, "idle": 0}
+        worst_st  = max((hp["status"] for hp in heat_pumps), key=lambda s: _status_rank.get(s, 0))
+        room_st   = "error" if worst_st == "error" else ("warning" if worst_st == "warning" else "optimal")
+
+        # ── 24-h temperature history: average across all devices ─────────────
+        all_device_ids = [d["device_id"] for d in _ROOM_CFG["devices"]]
+        all_ivs = ivs[ivs["device_id"].isin(all_device_ids)].copy()
+
+        avg_temp_series = (
+            all_ivs
+            .groupby("interval_start_time")["median_temperature_in_celsius"]
+            .mean()
+            .tail(96)
+        )
+
+        # Outside temp from first device snapshots
+        first_did    = _ROOM_CFG["devices"][0]["device_id"]
+        first_snaps  = df[df["device_id"] == first_did].set_index("last_seen_at")
+        h_out_series = pd.to_numeric(
+            first_snaps.get("status_temperature_outside_in_celsius", pd.Series(dtype=float)),
             errors="coerce",
         ).resample("15min").mean()
 
         temp_history: list[dict] = []
-        for _, row in dev_ivs.tail(96).iterrows():
-            ts  = row["interval_start_time"]
-            val = _safe_float(row.get("median_temperature_in_celsius"), float("nan"))
-            tgt = _safe_float(row.get("target_temperature_in_celsius"), target)
-            # Find nearest outside temp bucket
-            out_key = ts.floor("15min")
-            out_v   = h_out.get(out_key, temp_out)
-            if val != val:  # NaN
+        for ts, avg_val in avg_temp_series.items():
+            if pd.isna(avg_val):
                 continue
+            out_v = h_out_series.get(ts.floor("15min"), avg_out)
             temp_history.append({
                 "time":    ts.strftime("%H:%M"),
-                "temp":    round(val, 1),
-                "target":  round(tgt, 1),
-                "outside": round(_safe_float(out_v, temp_out), 1),
+                "temp":    round(float(avg_val), 1),
+                "target":  round(room_target, 1),
+                "outside": round(_safe_float(out_v, avg_out), 1),
             })
 
-        # ── 7-day energy comparison chart ─────────────────────────────────────
-        pwr_idx = dev_pwr.copy()
-        pwr_idx.index = pwr[pwr["device_id"] == did]["timestamp"].values
+        # ── 7-day energy history: sum across all devices ──────────────────────
+        all_pwr = pwr[pwr["device_id"].isin(all_device_ids)].set_index("timestamp")
+        daily_sum = (
+            all_pwr.groupby("device_id")["power_draw_kw"]
+            .resample("1D")
+            .mean()
+            .groupby(level=1)
+            .sum()
+        )
         energy_history: list[dict] = []
-        for ts, avg_kw in pwr_idx.resample("1D").mean().tail(7).items():
+        for ts, avg_kw in daily_sum.tail(7).items():
             if pd.isna(avg_kw):
                 continue
             actual_day   = float(avg_kw) * 24
@@ -773,61 +843,25 @@ def frontend_status():
                 "baseline": round(baseline_day, 1),
             })
 
-        # ── Anomalies from detector (decoded, capped at 5) ────────────────────
-        anomalies: list[dict] = []
-        for a in alerts_by_dev.get(did, [])[:5]:
-            ts_str = str(a.get("timestamp", ""))
-            anomalies.append({
-                "id":       f"{a['type']}-{ts_str[:10]}",
-                "severity": "high" if a["severity"] == "critical" else a["severity"],
-                "type":     a["type"].replace("_", " ").title(),
-                "message":  a["message"],
-                "time":     ts_str[11:16] or "—",
-                "resolved": False,
-            })
-
-        advice = _compute_advice(temp_c, target, temp_out, dev_ivs, op_mode)
+        advice = _compute_advice(avg_temp, room_target, avg_out, all_ivs, heat_pumps[0]["mode"])
 
         rooms.append({
-            "id":       cfg["id"],
-            "name":     cfg["name"],
-            "position": cfg["position"],
-            "size":     cfg["size"],
+            "id":       _ROOM_CFG["id"],
+            "name":     _ROOM_CFG["name"],
+            "position": _ROOM_CFG["position"],
+            "size":     _ROOM_CFG["size"],
             "status":   room_st,
             "temperature": {
-                "current": round(temp_c,   1),
-                "target":  round(target,   1),
-                "outside": round(temp_out, 1),
+                "current": avg_temp,
+                "target":  round(room_target, 1),
+                "outside": avg_out,
             },
-            "occupancy": {"current": 0, "max": 50},
+            "occupancy": {"current": 0, "max": 200},
             "advice":    advice,
-            "heatPumps": [{
-                "id":       cfg["hp_id"],
-                "deviceId": did,
-                "name":     f"IMBAT Orion {cfg['hp_id']}",
-                "model":    "ORIO-025",
-                "status":   unit_st,
-                "position": cfg["hp_pos"],
-                "power":    {"current": pwr_now, "max": 25.0},
-                "runtime":  _uptime_str(uptime_s),
-                "mode":     op_mode,
-                "temperature": {
-                    "supply":  round(temp_sup, 1),
-                    "return":  round(temp_ret, 1),
-                },
-                "airFlow": {
-                    "supply": round(fan_sup, 1),
-                    "return": round(fan_ret, 1),
-                },
-                "humidity":     round(humidity, 1),
-                "co2Ppm":       round(co2_ppm, 0),
-                "rawErrorRegisters": raw_regs,
-                "savings":      unit_savings,
-                "anomalies":    anomalies,
-            }],
+            "heatPumps": heat_pumps,
             "tempHistory":   temp_history,
             "energyHistory": energy_history,
-            "anomalies":     anomalies,
+            "anomalies":     combined_anomalies[:10],
         })
 
     # Offline placeholder halls
