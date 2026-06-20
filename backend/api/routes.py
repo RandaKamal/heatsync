@@ -1,4 +1,5 @@
 from datetime import datetime, timezone
+from typing import Optional
 
 import comfort.model as comfort
 import data.loader as loader
@@ -18,21 +19,21 @@ SPACE_ID = "3dbed10b-9e88-4163-916d-3182e2ecc69f"
 
 # ── helpers ──────────────────────────────────────────────────────────────────
 
-def _err(msg: str, code: int = 400) -> tuple[Response, int]:
+def _err(msg: str, code: int = 400):
     return jsonify({"error": msg}), code
 
 
 # ── health ────────────────────────────────────────────────────────────────────
 
 @api_bp.get("/health")
-def health() -> Response:
+def health():
     return jsonify({"status": "ok"})
 
 
 # ── weather ───────────────────────────────────────────────────────────────────
 
 @api_bp.get("/weather/forecast")
-def weather_forecast() -> Response:
+def weather_forecast():
     """7-day hourly + daily forecast. Query: lat, lon, days (1-16)."""
     lat = float(request.args.get("lat", DEFAULT_LAT))
     lon = float(request.args.get("lon", DEFAULT_LON))
@@ -41,7 +42,7 @@ def weather_forecast() -> Response:
 
 
 @api_bp.get("/weather/current")
-def weather_current() -> Response:
+def weather_current():
     """Current conditions (nearest forecast hour to now)."""
     lat = float(request.args.get("lat", DEFAULT_LAT))
     lon = float(request.args.get("lon", DEFAULT_LON))
@@ -51,7 +52,7 @@ def weather_current() -> Response:
 # ── devices ───────────────────────────────────────────────────────────────────
 
 @api_bp.get("/devices")
-def list_devices() -> Response:
+def list_devices():
     """All devices with 3-D position and latest snapshot per window."""
     devs = loader.devices().to_dict(orient="records")
     positions = controller.DEVICE_POSITIONS
@@ -62,7 +63,7 @@ def list_devices() -> Response:
 
 
 @api_bp.get("/devices/<device_id>/snapshots")
-def device_snapshots(device_id: str) -> Response | tuple[Response, int]:
+def device_snapshots(device_id: str):
     """
     Recent snapshots for a device.
     Query: window (heating|cooling), limit (default 100)
@@ -83,7 +84,7 @@ def device_snapshots(device_id: str) -> Response | tuple[Response, int]:
 
 
 @api_bp.get("/devices/<device_id>/power")
-def device_power(device_id: str) -> Response | tuple[Response, int]:
+def device_power(device_id: str):
     """
     Power draw history for a single device.
     Query: window (heating|cooling), bucket (15min|1h|1D)
@@ -107,7 +108,7 @@ def device_power(device_id: str) -> Response | tuple[Response, int]:
 # ── spaces / events ───────────────────────────────────────────────────────────
 
 @api_bp.get("/spaces/events")
-def space_events_all() -> Response:
+def space_events_all():
     """All scheduled space events across both windows."""
     result = {}
     for window in ("heating", "cooling"):
@@ -121,7 +122,7 @@ def space_events_all() -> Response:
 # ── impact ────────────────────────────────────────────────────────────────────
 
 @api_bp.get("/impact/summary")
-def impact_summary() -> Response:
+def impact_summary():
     """
     Energy saved (kWh), cost saved (€), CO2 saved (kg) — both windows + total.
     """
@@ -129,13 +130,13 @@ def impact_summary() -> Response:
 
 
 @api_bp.get("/impact/by-device")
-def impact_by_device() -> Response:
+def impact_by_device():
     """Per-device savings breakdown."""
     return jsonify(impact.by_device())
 
 
 @api_bp.get("/impact/timeline")
-def impact_timeline() -> Response | tuple[Response, int]:
+def impact_timeline():
     """
     Time-series power consumption for charts.
     Query: window (heating|cooling), bucket (15min|1h|1D, default 1h)
@@ -150,13 +151,13 @@ def impact_timeline() -> Response | tuple[Response, int]:
 # ── control ───────────────────────────────────────────────────────────────────
 
 @api_bp.get("/control/status")
-def control_status() -> Response:
+def control_status():
     """Current HVAC control state including all device overrides."""
     return jsonify(controller.get_status())
 
 
 @api_bp.post("/control/mode")
-def control_mode() -> Response | tuple[Response, int]:
+def control_mode():
     """
     Set global HVAC mode.
     Body: {"mode": "AUTO"|"HEAT"|"COOL"|"OFF"}
@@ -172,7 +173,7 @@ def control_mode() -> Response | tuple[Response, int]:
 
 
 @api_bp.post("/control/setpoint")
-def control_setpoint() -> Response | tuple[Response, int]:
+def control_setpoint():
     """
     Set global temperature setpoint.
     Body: {"temperature": 21.0}
@@ -188,7 +189,7 @@ def control_setpoint() -> Response | tuple[Response, int]:
 
 
 @api_bp.post("/control/device/<device_id>/toggle")
-def control_device_toggle(device_id: str) -> Response | tuple[Response, int]:
+def control_device_toggle(device_id: str):
     """
     Enable or disable a specific device.
     Body: {"enabled": true|false}
@@ -204,7 +205,7 @@ def control_device_toggle(device_id: str) -> Response | tuple[Response, int]:
 
 
 @api_bp.post("/control/device/<device_id>/setpoint")
-def control_device_setpoint(device_id: str) -> Response | tuple[Response, int]:
+def control_device_setpoint(device_id: str):
     """
     Set per-device temperature override. Pass null to clear override.
     Body: {"temperature": 20.0}  or  {"temperature": null}
@@ -219,7 +220,7 @@ def control_device_setpoint(device_id: str) -> Response | tuple[Response, int]:
 
 
 @api_bp.post("/control/prediction")
-def control_prediction() -> Response | tuple[Response, int]:
+def control_prediction():
     """
     Enable or disable automatic predictive scheduling.
     Body: {"enabled": true|false}
@@ -234,7 +235,7 @@ def control_prediction() -> Response | tuple[Response, int]:
 # ── prediction ────────────────────────────────────────────────────────────────
 
 @api_bp.get("/prediction/schedule")
-def prediction_schedule() -> Response:
+def prediction_schedule():
     """
     Recommended start times for all upcoming events in the next 7 days,
     based on weather forecast and historical heating/cooling rates.
@@ -245,7 +246,7 @@ def prediction_schedule() -> Response:
 
 
 @api_bp.get("/prediction/preheat")
-def prediction_preheat() -> Response:
+def prediction_preheat():
     """Should a preheat/precool action start right now?"""
     lat = float(request.args.get("lat", DEFAULT_LAT))
     lon = float(request.args.get("lon", DEFAULT_LON))
@@ -255,7 +256,7 @@ def prediction_preheat() -> Response:
 # ── comfort ───────────────────────────────────────────────────────────────────
 
 @api_bp.get("/comfort/current")
-def comfort_current() -> Response:
+def comfort_current():
     """
     Live thermal comfort snapshot using latest sensor data from the most
     recent device snapshot (or explicit query params for demo use).
@@ -284,7 +285,7 @@ def comfort_current() -> Response:
 
 
 @api_bp.get("/comfort/setpoint")
-def comfort_setpoint_for_month() -> Response:
+def comfort_setpoint_for_month():
     """
     Seasonal comfort setpoint for a given month and occupancy.
     Query: month (1-12, default current), occupancy (int, default 0)
@@ -303,7 +304,7 @@ def comfort_setpoint_for_month() -> Response:
 
 
 @api_bp.get("/comfort/holidays")
-def comfort_holidays() -> Response:
+def comfort_holidays():
     """
     Bayern public holidays in the next N days (no occupancy → unoccupied setpoint).
     Query: days (default 60)
@@ -315,7 +316,7 @@ def comfort_holidays() -> Response:
 # ── anomaly ───────────────────────────────────────────────────────────────────
 
 @api_bp.get("/anomaly/alerts")
-def anomaly_alerts() -> Response | tuple[Response, int]:
+def anomaly_alerts():
     """
     All detected anomalies.
     Query: window (heating|cooling, default heating)
@@ -332,7 +333,7 @@ _notification_log: list[dict] = []
 
 
 @api_bp.post("/anomaly/notify")
-def notify_technician() -> Response | tuple[Response, int]:
+def notify_technician():
     """
     Log a technician notification for an active alert.
     Body: { roomName, unitId, severity, message, deviceId }
@@ -361,7 +362,7 @@ def notify_technician() -> Response | tuple[Response, int]:
 
 
 @api_bp.get("/anomaly/notifications")
-def get_notifications() -> Response:
+def get_notifications():
     """Return the full technician notification log."""
     return jsonify(_notification_log)
 
@@ -390,7 +391,7 @@ EUR_PER_KWH       = 0.25
 IHL_SAVINGS_FACTOR = 0.25
 
 
-def _weather_label(code: object) -> str:
+def _weather_label(code: object):
     if code is None:
         return "Clear"
     c = int(code)  # type: ignore[arg-type]
@@ -404,7 +405,7 @@ def _weather_label(code: object) -> str:
     return "Cloudy"
 
 
-def _make_offline_room(cfg: dict) -> dict:
+def _make_offline_room(cfg: dict):
     return {
         "id": cfg["id"], "name": cfg["name"],
         "position": cfg["position"], "size": cfg["size"],
@@ -415,7 +416,7 @@ def _make_offline_room(cfg: dict) -> dict:
     }
 
 
-def _safe_float(val: object, default: float = 0.0) -> float:
+def _safe_float(val: object, default: float = 0.0):
     try:
         v = float(val)  # type: ignore[arg-type]
         return default if (v != v) else v  # NaN guard
@@ -423,7 +424,7 @@ def _safe_float(val: object, default: float = 0.0) -> float:
         return default
 
 
-def _uptime_str(seconds: float) -> str:
+def _uptime_str(seconds: float):
     h, rem = divmod(int(seconds), 3600)
     m = rem // 60
     return f"{h} h {m:02d} min"
@@ -435,7 +436,7 @@ def _compute_advice(
     outside_temp: float,
     dev_ivs: "pd.DataFrame",
     current_mode: str,
-) -> dict:
+):
     """
     Compute occupancy status, ETA to target, efficiency, and a plain-language
     recommendation for the detail panel.
@@ -462,7 +463,7 @@ def _compute_advice(
     else:
         occ_status = "unoccupied"
 
-    minutes_to_occupied: int | None = None
+    minutes_to_occupied: Optional[int] = None
     if not is_occupied and hour < OCCUPIED_START:
         minutes_to_occupied = int((OCCUPIED_START - hour) * 60)
 
@@ -472,10 +473,10 @@ def _compute_advice(
     HEAT_RATE_DEFAULT = 0.5   # °C per 15-min interval (heating)
     COOL_RATE_DEFAULT = -0.4  # °C per 15-min interval (cooling)
 
-    eta_minutes: int | None = None
+    eta_minutes: Optional[int] = None
     rate_source = "estimated"
 
-    def _rates_from_ivs(ivs_df: "pd.DataFrame") -> tuple[float, float]:
+    def _rates_from_ivs(ivs_df: "pd.DataFrame"):
         adj = ivs_df[ivs_df["was_adjusting_temperature"] == 1].sort_values("interval_start_time")
         temps = pd.to_numeric(adj["median_temperature_in_celsius"], errors="coerce").dropna()
         deltas = temps.diff().dropna()
@@ -615,7 +616,7 @@ def _compute_advice(
 
 
 @api_bp.get("/status")
-def frontend_status() -> Response:
+def frontend_status():
     """
     Single aggregated endpoint for the HeatSync 3-D UI.
     Returns 4 device-backed rooms + 2 offline placeholders (6 total).

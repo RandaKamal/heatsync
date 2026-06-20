@@ -9,7 +9,10 @@ Supports:
   - Noise limit: max power fraction during occupied events
 """
 
-from datetime import UTC, datetime
+from datetime import datetime, timezone
+from typing import Optional
+
+UTC = timezone.utc
 
 from comfort.model import MAX_EVENT_POWER_FRACTION, MOLD_ABSOLUTE_MIN_CELSIUS
 from data.loader import devices as load_devices
@@ -115,7 +118,7 @@ def toggle_device(device_id: str, enabled: bool) -> dict:
     return get_status()
 
 
-def set_device_setpoint(device_id: str, celsius: float | None) -> dict:
+def set_device_setpoint(device_id: str, celsius: Optional[float]) -> dict:
     """Per-device setpoint override. Pass None to clear."""
     if device_id not in _state["devices"]:
         raise ValueError(f"Unknown device_id: {device_id}")

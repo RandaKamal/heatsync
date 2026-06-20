@@ -12,7 +12,9 @@ Space config (from dataset README):
   Temperature limits  : 11-30 °C
 """
 
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta, timezone
+
+UTC = timezone.utc
 from zoneinfo import ZoneInfo
 
 import pandas as pd
