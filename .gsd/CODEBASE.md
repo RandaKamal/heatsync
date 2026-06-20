@@ -23,7 +23,7 @@ Generated: 2026-06-19T23:26:43Z | Files: 104 | Described: 0/104
 - `.github/agents/docs-maintainer.agent.md`
 - `.github/agents/signal-processing-engineer.agent.md`
 - `.github/agents/test-engineer.agent.md`
-- `.github/agents/vessel-detection-engineer.agent.md`
+- `.github/agents/heatmap-detection-engineer.agent.md`
 
 ### .github/instructions/
 - `.github/instructions/agent_maintenance_workflow.instructions.md`

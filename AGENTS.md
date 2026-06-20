@@ -39,7 +39,7 @@ Project-scoped agent definitions live under `.github/agents/`. When a task
 matches one of these specialties, load the matching agent file before acting or
 before delegating to a similarly named runtime agent:
 
-- `.github/agents/vessel-detection-engineer.agent.md` for HeatSync backend
+- `.github/agents/heatmap-detection-engineer.agent.md` for HeatSync backend
   modules, data contracts, control, prediction, anomaly detection, impact
   calculations, and API work.
 - `.github/agents/signal-processing-engineer.agent.md` for backend
