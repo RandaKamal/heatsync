@@ -1,8 +1,6 @@
 import numpy as np
-import pandas as pd
-import pytest
-from statsmodels.tsa.statespace.sarimax import SARIMAX
 from notebooks.utils import load_processed
+from statsmodels.tsa.statespace.sarimax import SARIMAX
 
 
 def test_sarimax_pipeline_heating() -> None:
