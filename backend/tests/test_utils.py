@@ -1,6 +1,7 @@
 import pathlib
 from collections.abc import Callable
 
+import numpy as np
 import pandas as pd
 import pytest
 
@@ -11,12 +12,15 @@ from notebooks.utils import (
     build_event_features,
     build_room_level_features,
     build_room_physical_model_frame,
+    check_coefficient_plausibility,
     load_intervals,
     load_power_draw,
     load_processed,
     load_snapshots,
     load_space_events,
+    predict_temperature,
     save_processed,
+    train_thermal_model,
     validate_columns,
 )
 
@@ -425,3 +429,158 @@ def test_build_room_physical_model_frame_aggregates_device_power() -> None:
     assert list(room_df["electricity_kwh"]) == [0.75, 1.75]
     assert list(room_df["cumulative_electricity_kwh"]) == [0.75, 2.5]
     assert list(room_df["occupancy_flag"]) == [1, 0]
+
+
+def test_check_coefficient_plausibility() -> None:
+    """
+    Test check_coefficient_plausibility logic.
+    """
+    # Plausible coefficients
+    assert check_coefficient_plausibility(0.9, 0.01, 0.05, 0.0) is True
+    # Implausible 'a'
+    assert check_coefficient_plausibility(-0.1, 0.01, 0.05, 0.0) is False
+    # Implausible 'b' (below threshold)
+    assert check_coefficient_plausibility(0.9, -0.05, 0.05, 0.0, threshold=0.01) is False
+    # Plausible 'b' (above threshold)
+    assert check_coefficient_plausibility(0.9, -0.005, 0.05, 0.0, threshold=0.01) is True
+    # Implausible 'c_heat'
+    assert check_coefficient_plausibility(0.9, 0.01, -0.05, 0.0, threshold=0.01) is False
+    # Implausible 'c_cool'
+    assert check_coefficient_plausibility(0.9, 0.01, 0.0, -0.05, threshold=0.01) is False
+
+
+def test_train_thermal_model_success() -> None:
+    """
+    Test successful thermal model training (heating/cooling) with synthetic plausible data.
+    """
+    idx = pd.date_range("2026-03-30 00:00:00", periods=20, freq="15min")
+    # For heating: T_next ~ 0.95 * room_temp + 0.02 * outside + 0.1 * room_power
+    room_temp = [20.0]
+    outside = [10.0] * 20
+    power = [10.0] * 20
+    for i in range(19):
+        t_next = 0.95 * room_temp[-1] + 0.02 * outside[i] + 0.01 * power[i] + np.random.normal(0, 0.01)
+        room_temp.append(t_next)
+
+    df = pd.DataFrame(
+        {
+            "room_temp": room_temp,
+            "outside_temperature": outside,
+            "room_power_kw": power,
+            "event_active": [0] * 20,
+        },
+        index=idx,
+    )
+
+    split_ts = pd.Timestamp("2026-03-30 04:00:00")
+    # Heating season
+    model_dict_h = train_thermal_model(df, "heating", split_ts, alpha=0.1)
+    assert model_dict_h["season"] == "heating"
+    assert model_dict_h["is_fallback"] is False
+    assert model_dict_h["a"] > 0
+    assert model_dict_h["b"] >= -1e-2
+    assert model_dict_h["c_heat"] >= -1e-2
+    assert model_dict_h["c_cool"] == 0.0
+
+    # Cooling season with synthetic cooling data
+    # T_next ~ 0.95 * room_temp + 0.02 * outside - 0.01 * cooling_power
+    room_temp_c = [22.0]
+    for i in range(19):
+        t_next = 0.95 * room_temp_c[-1] + 0.02 * outside[i] - 0.01 * power[i] + np.random.normal(0, 0.01)
+        room_temp_c.append(t_next)
+
+    df_c = pd.DataFrame(
+        {
+            "room_temp": room_temp_c,
+            "outside_temperature": outside,
+            "room_power_kw": power,
+            "event_active": [0] * 20,
+        },
+        index=idx,
+    )
+    model_dict_c = train_thermal_model(df_c, "cooling", split_ts, alpha=0.1)
+    assert model_dict_c["season"] == "cooling"
+    assert model_dict_c["is_fallback"] is False
+    assert model_dict_c["a"] > 0
+    assert model_dict_c["b"] >= -1e-2
+    assert model_dict_c["c_cool"] >= -1e-2
+    assert model_dict_c["c_heat"] == 0.0
+
+
+def test_train_thermal_model_fallback() -> None:
+    """
+    Test that train_thermal_model correctly triggers fallback when coefficients are implausible.
+    """
+    idx = pd.date_range("2026-03-30 00:00:00", periods=20, freq="15min")
+    # Implausible relationship: temperature drops sharply when heating power is very high
+    room_temp = [20.0 - 5.0 * i for i in range(20)]
+    df = pd.DataFrame(
+        {
+            "room_temp": room_temp,
+            "outside_temperature": [10.0] * 20,
+            "room_power_kw": [1.0 * i for i in range(20)],
+            "event_active": [0] * 20,
+        },
+        index=idx,
+    )
+
+    split_ts = pd.Timestamp("2026-03-30 04:00:00")
+    model_dict = train_thermal_model(df, "heating", split_ts)
+    assert model_dict["is_fallback"] is True
+    assert model_dict["fallback_reason"] is not None
+    assert model_dict["features"] == ["room_temp"]
+    assert model_dict["a"] > 0
+    assert model_dict["b"] == 0.0
+    assert model_dict["c_heat"] == 0.0
+    assert model_dict["c_cool"] == 0.0
+
+
+def test_train_thermal_model_errors() -> None:
+    """
+    Test train_thermal_model validation errors.
+    """
+    idx = pd.date_range("2026-03-30 00:00:00", periods=5, freq="15min")
+    df = pd.DataFrame(
+        {
+            "room_temp": [20.0] * 5,
+            "outside_temperature": [10.0] * 5,
+            "room_power_kw": [1.0] * 5,
+            "event_active": [0] * 5,
+        },
+        index=idx,
+    )
+
+    # Invalid season
+    with pytest.raises(ValueError, match="season must be"):
+        train_thermal_model(df, "shoulder", pd.Timestamp("2026-03-30 00:45:00"))
+
+    # Empty training set
+    with pytest.raises(ValueError, match="Training data is empty before"):
+        train_thermal_model(df, "heating", pd.Timestamp("2026-03-30 00:00:00"))
+
+
+def test_predict_temperature() -> None:
+    """
+    Test predict_temperature predictions and error conditions.
+    """
+    idx = pd.date_range("2026-03-30 00:00:00", periods=5, freq="15min")
+    df = pd.DataFrame(
+        {
+            "room_temp": [20.0] * 5,
+            "outside_temperature": [10.0] * 5,
+            "room_power_kw": [1.0] * 5,
+            "event_active": [0] * 5,
+        },
+        index=idx,
+    )
+
+    model_dict = train_thermal_model(df, "heating", pd.Timestamp("2026-03-30 00:45:00"))
+    preds = predict_temperature(model_dict, df)
+    assert len(preds) == 5
+    assert not preds.isna().any()
+
+    # Missing column
+    df_missing = df.drop(columns=["room_temp"])
+    with pytest.raises(ValueError, match="Required features"):
+        predict_temperature(model_dict, df_missing)
+

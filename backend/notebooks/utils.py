@@ -8,6 +8,8 @@ import warnings
 from typing import Any
 
 import pandas as pd
+from sklearn.linear_model import Ridge
+from sklearn.preprocessing import StandardScaler
 
 logger = logging.getLogger(__name__)
 
@@ -680,4 +682,146 @@ def build_event_features(
     ).astype(float)
 
     return feat_df
+
+
+def check_coefficient_plausibility(
+    a: float, b: float, c_heat: float, c_cool: float, threshold: float = 1e-2
+) -> bool:
+    """
+    Check if the physical coefficients of the thermal model are plausible.
+    a > 0: indoor temperature has positive autocorrelation.
+    b >= -threshold: outside temperature effect is positive or near zero.
+    c_heat >= -threshold: heating power increases or doesn't change temperature.
+    c_cool >= -threshold: cooling power decreases or doesn't change temperature.
+    """
+    if a <= 0:
+        return False
+    if b < -threshold:
+        return False
+    if c_heat < -threshold:
+        return False
+    if c_cool < -threshold:
+        return False
+    return True
+
+
+def train_thermal_model(
+    df: pd.DataFrame,
+    season: str,
+    split_timestamp: pd.Timestamp,
+    alpha: float = 1.0,
+) -> dict[str, Any]:
+    """
+    Train a grey-box thermal model using Ridge regression.
+    Equation: T_next = a*T_room + b*T_outside + c_heat*total_heating_power - c_cool*total_cooling_power + d*event_active
+    """
+    if season not in ["heating", "cooling"]:
+        raise ValueError("season must be 'heating' or 'cooling'")
+
+    df_copy = df.copy()
+    df_copy["T_next"] = df_copy["room_temp"].shift(-1)
+
+    feature_cols = ["room_temp", "outside_temperature", "room_power_kw", "event_active"]
+    df_copy = df_copy.dropna(subset=["T_next"] + feature_cols)
+
+    train_df = df_copy[df_copy.index < split_timestamp]
+    if train_df.empty:
+        raise ValueError(f"Training data is empty before {split_timestamp}")
+
+    X_train = train_df[feature_cols]
+    y_train = train_df["T_next"]
+
+    scaler = StandardScaler()
+    X_train_scaled = scaler.fit_transform(X_train)
+
+    model = Ridge(alpha=alpha, fit_intercept=True)
+    model.fit(X_train_scaled, y_train)
+
+    w = model.coef_
+    a = w[0] / scaler.scale_[0]
+    b = w[1] / scaler.scale_[1]
+    c_power = w[2] / scaler.scale_[2]
+    d = w[3] / scaler.scale_[3]
+
+    if season == "heating":
+        c_heat = c_power
+        c_cool = 0.0
+    else:
+        c_heat = 0.0
+        c_cool = -c_power
+
+    is_plausible = check_coefficient_plausibility(a, b, c_heat, c_cool)
+
+    if not is_plausible:
+        fallback_reason = f"Implausible coefficients: a={a:.6f}, b={b:.6f}, c_heat={c_heat:.6f}, c_cool={c_cool:.6f}"
+        logger.warning(f"Activating room-level fallback for season {season}: {fallback_reason}")
+
+        fb_features = ["room_temp"]
+        X_train_fb = train_df[fb_features]
+        scaler_fb = StandardScaler()
+        X_train_fb_scaled = scaler_fb.fit_transform(X_train_fb)
+
+        model_fb = Ridge(alpha=alpha, fit_intercept=True)
+        model_fb.fit(X_train_fb_scaled, y_train)
+
+        w_fb = model_fb.coef_
+        a_fb = w_fb[0] / scaler_fb.scale_[0]
+        intercept_fb = model_fb.intercept_ - (w_fb[0] * scaler_fb.mean_[0] / scaler_fb.scale_[0])
+
+        return {
+            "model": model_fb,
+            "scaler": scaler_fb,
+            "season": season,
+            "is_fallback": True,
+            "fallback_reason": fallback_reason,
+            "a": a_fb,
+            "b": 0.0,
+            "c_heat": 0.0,
+            "c_cool": 0.0,
+            "d": 0.0,
+            "intercept": intercept_fb,
+            "features": fb_features,
+        }
+
+    intercept = model.intercept_ - (
+        w[0] * scaler.mean_[0] / scaler.scale_[0] +
+        w[1] * scaler.mean_[1] / scaler.scale_[1] +
+        w[2] * scaler.mean_[2] / scaler.scale_[2] +
+        w[3] * scaler.mean_[3] / scaler.scale_[3]
+    )
+
+    return {
+        "model": model,
+        "scaler": scaler,
+        "season": season,
+        "is_fallback": False,
+        "fallback_reason": None,
+        "a": a,
+        "b": b,
+        "c_heat": c_heat,
+        "c_cool": c_cool,
+        "d": d,
+        "intercept": intercept,
+        "features": feature_cols,
+    }
+
+
+def predict_temperature(model_dict: dict[str, Any], df: pd.DataFrame) -> pd.Series:
+    """
+    Predict next step's room temperature using the trained model dict.
+    """
+    features = model_dict["features"]
+    missing = [col for col in features if col not in df.columns]
+    if missing:
+        raise ValueError(f"Required features {missing} not found in input DataFrame.")
+
+    X = df[features]
+    non_nan_mask = X.notna().all(axis=1)
+
+    preds = pd.Series(float("nan"), index=df.index, dtype="float64")
+    if non_nan_mask.any():
+        X_valid = X[non_nan_mask]
+        X_scaled = model_dict["scaler"].transform(X_valid)
+        preds.loc[non_nan_mask] = model_dict["model"].predict(X_scaled)
+    return preds
 
