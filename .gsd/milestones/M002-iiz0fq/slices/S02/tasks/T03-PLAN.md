@@ -4,7 +4,7 @@ estimated_files: 2
 skills_used: []
 ---
 
-# T03: Select schedules and format per-event control outputs
+# T03: Added event-control schedule selection, per-event schedule formatting, compact diagnostics, and scoped CSV report persistence for optimizer outputs.
 
 ---
 skills_used:

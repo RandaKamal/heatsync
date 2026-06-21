@@ -4,7 +4,7 @@ estimated_files: 3
 skills_used: []
 ---
 
-# T04: Wire optimizer into 07 notebook and persist schedules
+# T04: Wired the S02 event-control optimizer into notebook 07 and persisted heating and cooling selected schedule CSV reports.
 
 ---
 skills_used:

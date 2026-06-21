@@ -19,7 +19,7 @@
 - [x] **S01: Data Pipeline, Thermal Model, and Device Power Model** `risk:high` `depends:[]`
   > After this: Notebook cells 1–N execute on both heating and cooling seasons: config dicts visible, data loaded and merged to 15-min grid with device-level and room-level features, grey-box thermal model trained with physically plausible coefficients (or room-level fallback activated), device power model trained, all model artifacts saved to backend/artifacts/event_device_control/models/ and successfully reloaded with LOAD_EXISTING_MODEL=True. Printed: model coefficients, temperature MAE/RMSE, power prediction RMSE.
 
-- [ ] **S02: Event-Based Optimizer and Control Schedule** `risk:medium` `depends:[S01]`
+- [x] **S02: Event-Based Optimizer and Control Schedule** `risk:medium` `depends:[S01]`
   > After this: Notebook cells execute the event-based optimizer on both seasons' validation events: for each event, evaluates candidate start times × device subsets, selects cheapest feasible schedule (or reports smallest comfort violation), and outputs explicit control-action schedule table with event_id, mode, start_time, device_1–4_on, target_temp, predicted_temp_at_start, expected_kwh/cost/co2. Infeasible events flagged transparently.
 
 - [ ] **S03: Baseline vs Smart-Control Comparison, Plots, and CSV Reports** `risk:low` `depends:[S01,S02]`

@@ -1,7 +1,7 @@
 # Codebase Map
 
-Generated: 2026-06-21T06:14:01Z | Files: 172 | Described: 0/172
-<!-- gsd:codebase-meta {"generatedAt":"2026-06-21T06:14:01Z","fingerprint":"dc0503fecef62332ac93c81ea91f4e4fc950f0e2","fileCount":172,"truncated":false} -->
+Generated: 2026-06-21T08:54:47Z | Files: 174 | Described: 0/174
+<!-- gsd:codebase-meta {"generatedAt":"2026-06-21T08:54:47Z","fingerprint":"4da1f1ed721bc202c2ffdde8b376c2a005720bfe","fileCount":174,"truncated":false} -->
 
 ### (root)/
 - `.gitignore`
@@ -99,6 +99,10 @@ Generated: 2026-06-21T06:14:01Z | Files: 172 | Described: 0/172
 - `backend/artifacts/event_device_control/models/model_metadata.json`
 - `backend/artifacts/event_device_control/models/scaler.joblib`
 - `backend/artifacts/event_device_control/models/thermal_model.joblib`
+
+### backend/artifacts/event_device_control/reports/
+- `backend/artifacts/event_device_control/reports/cooling_event_control_results.csv`
+- `backend/artifacts/event_device_control/reports/heating_event_control_results.csv`
 
 ### backend/comfort/
 - `backend/comfort/__init__.py`

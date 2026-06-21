@@ -49,7 +49,7 @@ S02 closes by producing in-notebook and persisted selected event-control schedul
   - Files: `backend/notebooks/utils.py`, `backend/tests/test_utils.py`
   - Verify: uv run --project backend pytest backend/tests/test_utils.py -k event_candidate
 
-- [ ] **T03: Select schedules and format per-event control outputs** `est:0.75 day`
+- [x] **T03: Added event-control schedule selection, per-event schedule formatting, compact diagnostics, and scoped CSV report persistence for optimizer outputs.** `est:0.75 day`
   ---
   skills_used:
     - verify-before-complete
@@ -59,7 +59,7 @@ S02 closes by producing in-notebook and persisted selected event-control schedul
   - Files: `backend/notebooks/utils.py`, `backend/tests/test_utils.py`
   - Verify: uv run --project backend pytest backend/tests/test_utils.py -k event_optimizer
 
-- [ ] **T04: Wire optimizer into 07 notebook and persist schedules** `est:0.5 day`
+- [x] **T04: Wired the S02 event-control optimizer into notebook 07 and persisted heating and cooling selected schedule CSV reports.** `est:0.5 day`
   ---
   skills_used:
     - write-docs
@@ -69,7 +69,7 @@ S02 closes by producing in-notebook and persisted selected event-control schedul
   - Files: `backend/notebooks/07_event_based_device_control.ipynb`, `backend/artifacts/event_device_control/reports/heating_event_control_results.csv`, `backend/artifacts/event_device_control/reports/cooling_event_control_results.csv`
   - Verify: uv run --project backend pytest backend/tests/test_notebooks.py -k event_based_device_control
 
-- [ ] **T05: Run S02 integration verification** `est:0.25 day`
+- [x] **T05: Ran S02 integration verification for the event-control utilities and notebook integration under the backend uv environment.** `est:0.25 day`
   ---
   skills_used:
     - verify-before-complete

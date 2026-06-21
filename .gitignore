@@ -184,3 +184,6 @@ temp/
 .cache/
 event_based_device_control_task.md
 .claude
+
+# ── GSD baseline (auto-generated) ──
+.gsd-worktrees/
