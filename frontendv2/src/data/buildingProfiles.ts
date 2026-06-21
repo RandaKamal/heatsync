@@ -1,0 +1,156 @@
+import type { BuildingProfile, ThermalParameters } from '../types/buildingProfile'
+
+export const BUILDING_PROFILES: BuildingProfile[] = [
+  {
+    id: 'temporary-lecture-hall',
+    name: 'Temporary Lecture Hall',
+    description: 'A medium-to-large insulated temporary space with scheduled, mostly seated occupancy.',
+    icon: '🎓',
+    building: {
+      floorAreaM2: 400,
+      volumeM3: 1200,
+      insulationLevel: 'medium',
+      airLeakageLevel: 'medium',
+      thermalMassLevel: 'medium',
+    },
+    thermal: {
+      thermalTimeConstantHours: 4.5,
+      estimatedHeatRetentionHours: 3.5,
+      heatingRateCPerHour: 1.8,
+      coolingRateCPerHour: 1.4,
+      envelopeResistanceIndex: 0.62,
+      effectiveThermalCapacityIndex: 0.58,
+      heatingEfficiencyIndex: 0.76,
+      coolingEfficiencyIndex: 0.70,
+    },
+    occupancy: {
+      typicalOccupancy: 120,
+      maximumOccupancy: 200,
+      activityType: 'seated',
+      sensibleHeatGainWPerPerson: 75,
+      doorOpeningIntensity: 'medium',
+    },
+    comfort: {
+      heatingComfortMinC: 19.5,
+      heatingComfortMaxC: 22.0,
+      coolingComfortMinC: 22.5,
+      coolingComfortMaxC: 25.5,
+      humidityMinPercent: 40,
+      humidityMaxPercent: 60,
+      co2WarningPpm: 1000,
+    },
+    calibration: {
+      recommendedCalibrationHours: 8,
+      initialConfidencePercent: 55,
+    },
+  },
+  {
+    id: 'event-tent',
+    name: 'Event Tent',
+    description: 'A lightweight, highly dynamic event structure with large occupancy and strong internal heat gains.',
+    icon: '⛺',
+    building: {
+      floorAreaM2: 800,
+      volumeM3: 2400,
+      insulationLevel: 'low',
+      airLeakageLevel: 'high',
+      thermalMassLevel: 'low',
+    },
+    thermal: {
+      thermalTimeConstantHours: 1.4,
+      estimatedHeatRetentionHours: 1.0,
+      heatingRateCPerHour: 2.3,
+      coolingRateCPerHour: 1.7,
+      envelopeResistanceIndex: 0.28,
+      effectiveThermalCapacityIndex: 0.25,
+      heatingEfficiencyIndex: 0.66,
+      coolingEfficiencyIndex: 0.61,
+    },
+    occupancy: {
+      typicalOccupancy: 350,
+      maximumOccupancy: 600,
+      activityType: 'active',
+      sensibleHeatGainWPerPerson: 120,
+      doorOpeningIntensity: 'high',
+    },
+    comfort: {
+      heatingComfortMinC: 18.0,
+      heatingComfortMaxC: 21.0,
+      coolingComfortMinC: 21.0,
+      coolingComfortMaxC: 24.5,
+      humidityMinPercent: 35,
+      humidityMaxPercent: 65,
+      co2WarningPpm: 1200,
+    },
+    calibration: {
+      recommendedCalibrationHours: 6,
+      initialConfidencePercent: 42,
+    },
+  },
+  {
+    id: 'temporary-office',
+    name: 'Temporary Office',
+    description: 'A modular office environment with stable light activity and comparatively predictable daily use.',
+    icon: '🏢',
+    building: {
+      floorAreaM2: 250,
+      volumeM3: 650,
+      insulationLevel: 'medium-high',
+      airLeakageLevel: 'low',
+      thermalMassLevel: 'medium',
+    },
+    thermal: {
+      thermalTimeConstantHours: 6.0,
+      estimatedHeatRetentionHours: 5.0,
+      heatingRateCPerHour: 1.4,
+      coolingRateCPerHour: 1.1,
+      envelopeResistanceIndex: 0.74,
+      effectiveThermalCapacityIndex: 0.67,
+      heatingEfficiencyIndex: 0.79,
+      coolingEfficiencyIndex: 0.73,
+    },
+    occupancy: {
+      typicalOccupancy: 35,
+      maximumOccupancy: 60,
+      activityType: 'light',
+      sensibleHeatGainWPerPerson: 75,
+      doorOpeningIntensity: 'low',
+    },
+    comfort: {
+      heatingComfortMinC: 20.0,
+      heatingComfortMaxC: 23.0,
+      coolingComfortMinC: 22.5,
+      coolingComfortMaxC: 25.5,
+      humidityMinPercent: 40,
+      humidityMaxPercent: 60,
+      co2WarningPpm: 1000,
+    },
+    calibration: {
+      recommendedCalibrationHours: 12,
+      initialConfidencePercent: 60,
+    },
+  },
+]
+
+export const DEFAULT_PROFILE_ID = 'temporary-lecture-hall'
+
+export const CALIBRATION_ADJUSTMENTS: Record<string, Partial<ThermalParameters>> = {
+  'temporary-lecture-hall': {
+    thermalTimeConstantHours: 5.1,
+    estimatedHeatRetentionHours: 4.2,
+    heatingRateCPerHour: 1.65,
+    envelopeResistanceIndex: 0.69,
+  },
+  'event-tent': {
+    thermalTimeConstantHours: 1.6,
+    estimatedHeatRetentionHours: 1.2,
+    heatingRateCPerHour: 2.1,
+    envelopeResistanceIndex: 0.32,
+  },
+  'temporary-office': {
+    thermalTimeConstantHours: 6.4,
+    estimatedHeatRetentionHours: 5.3,
+    heatingRateCPerHour: 1.3,
+    envelopeResistanceIndex: 0.78,
+  },
+}

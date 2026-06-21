@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { ClimateDevice, RoomEvent, WeatherForecastPoint } from '../types/campus'
-import { fetchDevices, fetchWeatherForecast, fetchSpaceEvents } from '../api/client'
+import { fetchDevices, fetchWeatherForecast, fetchSchedule } from '../api/client'
 
 export function useLiveData() {
   const [devices, setDevices] = useState<ClimateDevice[]>([])
@@ -18,14 +18,14 @@ export function useLiveData() {
         const [devs, weather, events] = await Promise.all([
           fetchDevices(),
           fetchWeatherForecast(),
-          fetchSpaceEvents()
+          fetchSchedule()
         ])
         
         if (mounted) {
           setDevices(devs)
           setWeatherForecast(weather)
           // Combine heating and cooling events for now
-          setRoomEvents([...(events.heating || []), ...(events.cooling || [])])
+          setRoomEvents(events)
           setError(null)
         }
       } catch (err) {

@@ -1,0 +1,110 @@
+DELETED / NOT-YET-BACKED-BY-BACKEND FEATURES
+=============================================
+Recorded when cleaning the 3-D scene to use only backend-provided data.
+"Backend" = Flask API at /api/* as defined in backend/api/routes.py.
+
+── REMOVED INTERACTIONS ─────────────────────────────────────────────────────
+- OrbitControls  (drag to rotate, scroll to zoom, shift+drag to pan)
+- Tap a device   (click → DeviceCard popup / device selection)
+- Device inspect panel opened from 3-D click (DeviceCard)
+- Hover cursor change (pointer cursor on hover over devices and rooms)
+- scene-instructions HUD ("Drag rotate / Scroll zoom / Shift+drag pan / Tap a device inspect")
+
+── STATISTICS REMOVED FROM 3-D LABELS (not provided by backend) ─────────────
+- efficiencyCop          — COP / efficiency ratio; no backend endpoint
+- energyTodayKwh         — backend has total historical kWh, not a "today" counter
+- runtimeTodayMinutes    — not in backend
+- compressorRuntimeMinutes — not in backend
+- airflowM3h             — not in backend
+- freshAirRatioPct       — not in backend
+- supplyFanSpeedPct      — not in backend
+- healthScore            — not in backend
+- currentPowerKw (live)  — backend has 5-min historical intervals, not a live reading
+- history[]              — per-device minute-resolution telemetry not in backend
+- runtimeHeatmap[]       — weekly day/hour runtime heatmap not in backend
+- influencingFactors[]   — AI-generated human-readable explanations not in backend
+- room.occupancy         — backend has event schedule, not real-time headcount
+- room.capacity          — not in backend
+- room.forecastOccupancy — not in backend
+- room.nextEvent string  — backend has /api/prediction/schedule but not per-room
+- room.currentTemperature in 3-D label — backend has snapshots but not wired to label yet
+- room.humidityPct       — backend has snapshots but not wired to label yet
+
+── DATA SOURCES REMOVED FROM MOCK (entire objects not in backend) ────────────
+- buildingTelemetry[]    — aggregated building-level time series; no backend endpoint
+- controlDecisions[]     — automated decision log; no backend endpoint
+- plannedActions[]       — ControlTimeline items; no backend endpoint
+- roomLoadHeatmap[]      — per-room load % heatmap; no backend endpoint
+- weatherForecast.solarWm2 — backend (Open-Meteo) does not return solar irradiance
+- Rooms G02, G03, F01, F02, F03 — backend dataset has exactly 1 space (3dbed10b-…)
+- roomEvents with expectedStudents — backend /api/spaces/events has start/end,
+                                     not student headcount per event
+
+── WHAT THE BACKEND CURRENTLY PROVIDES (available to wire in later) ──────────
+/api/devices                → device_id, label, type, hardware_version, position {x,y,z,section}
+/api/control/status         → global mode (AUTO/HEAT/COOL/OFF), setpoint_celsius, per-device enabled
+/api/impact/summary         → actual_kwh, energy_saved_kwh, cost_saved_eur, co2_saved_kg
+/api/impact/by-device       → same, per device
+/api/anomaly/alerts         → severity, type, message per device
+/api/weather/current        → temperature_2m, relative_humidity_2m, hvac_mode, heating_likely, cooling_likely
+/api/weather/forecast       → 7-day hourly: same fields + precipitation, wind, cloud_cover
+/api/prediction/schedule    → upcoming event start times with recommended HVAC start
+/api/comfort/current        → PMV, PPD, comfort_setpoint, mold_risk
+/api/comfort/holidays       → upcoming Bayern Feiertage
+/api/devices/<id>/snapshots → room temperature, humidity, CO2, supply/return temps (historical)
+/api/devices/<id>/power     → 5-min power draw time series
+
+── UI SIMPLIFICATION PASS (2026-06-21) ───────────────────────────────────────
+Recorded when streamlining the Building Profile wizard and view-specific controls.
+
+- Profile card description text on the Building Profile selection screen
+  (ProfileSelector) — cards now show icon + name only.
+- "Thermal behaviour" section in Site Parameters (ProfileDetailsPanel) —
+  thermal_time_constant, heat_retention, heating/cooling rate, and the
+  advanced envelope/capacity/efficiency indices. These are set automatically
+  by the Site Calibration flow, so manual inputs were redundant.
+- Air leakage / Thermal mass fields (Building section), Maximum occupancy /
+  Sensible heat gain / Door opening intensity (Occupancy section), and
+  Cooling comfort min/max / Humidity min/max / CO2 warning (Comfort section)
+  in Site Parameters — kept the panel to floor area, volume, insulation,
+  typical occupancy, activity type, and heating comfort range.
+- "Commission Heat Pumps" button (CalibrationPanel/BuildingProfilePage) —
+  heat pumps now render in the 3-D view as soon as a profile is selected
+  (ProfileBuildingCanvas showDevices is no longer gated on a wizard step).
+  Importing a schedule now advances the wizard straight to the
+  "commissioned" / Fleet Learning Card state.
+  - WizardStep no longer has a 'scheduling' value; commissionUnits() removed
+    from useProfileState.
+- "Fault Log" top-bar button (service view) — removed; the Technician
+  button is now customer-view only (it lets the customer alert the
+  technician about anomalies). The service view instead gets a
+  "🔔 Notifications" button (TopBar) and a relabelled sidebar shortcut
+  (ServiceSidebar "Notifications", was "Full log") that both open
+  TechnicianPanel in mode="service" — a read-only log of requests the
+  customer has sent, with no "Active alerts" tab / Alert Technician action.
+- "Room condition" legend panel (top-left of the customer-view map,
+  App.tsx `.map-legend`) — removed along with the now-unused
+  `legendStatuses` constant.
+
+── FAULT-DEMO ARCHITECTURE REPLACED (2026-06-21) ─────────────────────────────
+Recorded when adding the Fault Simulation and Incident Replay feature
+(shared customer/LB-Energy incident state machine, see
+src/simulation/incident/). The old hardcoded 60-second demo was deleted
+wholesale rather than kept alongside the new one, to avoid two independent
+fault-demo architectures — see the delivery report in the PR/session notes
+for the full design rationale.
+
+- `src/hooks/useFailureSimulation.ts`, `src/simulation/types.ts`,
+  `src/simulation/failureScenario.ts`,
+  `src/components/ui/FailureSimulationPanel.tsx` — removed entirely.
+  This was already stale: it referenced rooms `G03`/`F03` and devices
+  `ORION-03`/`S-F03` that no longer exist in `data/mockCampus.ts` (the
+  campus was simplified at some earlier point and this file was never
+  updated), so those branches were silently no-oping on a detached clone.
+  Replaced by `src/hooks/useIncidentReplay.ts`, which keeps the same
+  "always returns the full campus rooms/devices frame" contract that
+  `App.tsx`'s `CampusCanvas`/`CampusSidebar` depend on.
+- The "Demo scenario" floating button (App.tsx, customer view only) —
+  replaced by a "Fault simulation" button available from both Customer
+  and LB Energy Service views, opening the new incident-replay controls
+  + per-view panel.
