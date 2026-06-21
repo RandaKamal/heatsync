@@ -4,7 +4,7 @@ estimated_files: 2
 skills_used: []
 ---
 
-# T01: Leakage-Safe Comparison Helpers and Tests
+# T01: Added leakage-safe baseline-vs-smart-control comparison time-series and per-event report augmentation helpers with focused edge-case tests.
 
 ---
 skills_used:

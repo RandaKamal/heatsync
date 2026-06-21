@@ -31,7 +31,7 @@ S03 consumes S01 thermal/device-power model artifacts, S02 schedule outputs, and
 
 ## Tasks
 
-- [ ] **T01: Leakage-Safe Comparison Helpers and Tests** `est:1 day`
+- [x] **T01: Added leakage-safe baseline-vs-smart-control comparison time-series and per-event report augmentation helpers with focused edge-case tests.** `est:1 day`
   ---
   skills_used:
     - design-an-interface

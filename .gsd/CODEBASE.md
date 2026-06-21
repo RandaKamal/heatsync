@@ -1,7 +1,7 @@
 # Codebase Map
 
-Generated: 2026-06-21T08:54:47Z | Files: 174 | Described: 0/174
-<!-- gsd:codebase-meta {"generatedAt":"2026-06-21T08:54:47Z","fingerprint":"4da1f1ed721bc202c2ffdde8b376c2a005720bfe","fileCount":174,"truncated":false} -->
+Generated: 2026-06-21T09:52:20Z | Files: 175 | Described: 0/175
+<!-- gsd:codebase-meta {"generatedAt":"2026-06-21T09:52:20Z","fingerprint":"b7ad30ad041b3b3892f8495d6083843135998571","fileCount":175,"truncated":false} -->
 
 ### (root)/
 - `.gitignore`
@@ -165,6 +165,7 @@ Generated: 2026-06-21T08:54:47Z | Files: 174 | Described: 0/174
 - `backend/tests/test_anomaly.py`
 - `backend/tests/test_api.py`
 - `backend/tests/test_energy.py`
+- `backend/tests/test_event_control_reporting.py`
 - `backend/tests/test_impact.py`
 - `backend/tests/test_loader.py`
 - `backend/tests/test_lstm.py`
