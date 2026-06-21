@@ -135,3 +135,35 @@ Operators can:
 HeatSync aims to make building heating and cooling more efficient, transparent, and user-friendly.
 
 The goal is to reduce unnecessary energy consumption while keeping rooms comfortable and helping operators react faster to technical issues.
+
+---
+
+## Technical Stack & Development Setup
+
+HeatSync is divided into a modern web frontend and a Python backend.
+
+### Frontend (`frontendv2/`)
+
+The user interface is built with **React** and **TypeScript**, using **Vite** as the build tool. It includes 3D visualizations using React Three Fiber and data charting with Recharts.
+
+**Quick Start:**
+```bash
+cd frontendv2
+npm install
+npm run dev
+```
+
+### Backend (`backend/`)
+
+The backend is written in **Python** (using **Flask**) and uses **`uv`** for fast and reliable dependency management. It provides the core REST API, anomaly detection, prediction models, and control logic.
+
+**Quick Start:**
+```bash
+# Sync dependencies and development tools
+uv sync --project backend --frozen --dev
+
+# Run the Flask API server
+uv run --project backend python backend/app.py
+```
+
+> **Note:** For more information on backend quality gates (linting, typing, testing, and security checks), refer to the [`backend/README.md`](backend/README.md).
