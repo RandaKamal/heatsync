@@ -21,7 +21,7 @@ Notebook cells use existing utils.py loaders (load_processed or build_aligned_da
 
 ## Tasks
 
-- [ ] **T01: Notebook scaffold and device-level data pipeline** `est:2-3 hours`
+- [x] **T01: Established and verified the event-based device-control notebook scaffold plus reusable device, room, and event feature builders for both seasonal datasets.** `est:2-3 hours`
   1. Create `backend/notebooks/07_event_based_device_control.ipynb` with markdown header cells and config dicts at the top (`comfort_config`, `control_config`, `energy_config` with `electricity_price_eur_per_kWh: 0.35`, `co2_kg_per_kWh: 0.40`).
   2. Load both seasonal datasets using existing `utils.py` loaders (`load_processed` or `build_aligned_dataset`). Verify the data shape: 15-minute grid, per-device columns present.
   3. Build device-level features: aggregate 5-min `power_draw.csv` to 15-min mean power per device; create wide columns `device_i_active` and `device_i_power_kw` for i=1..4 with configurable activity threshold (`was_adjusting_temperature == 1` OR power > standby baseline).

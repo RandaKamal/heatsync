@@ -4,7 +4,7 @@ estimated_files: 2
 skills_used: []
 ---
 
-# T01: Notebook scaffold and device-level data pipeline
+# T01: Established and verified the event-based device-control notebook scaffold plus reusable device, room, and event feature builders for both seasonal datasets.
 
 1. Create `backend/notebooks/07_event_based_device_control.ipynb` with markdown header cells and config dicts at the top (`comfort_config`, `control_config`, `energy_config` with `electricity_price_eur_per_kWh: 0.35`, `co2_kg_per_kWh: 0.40`).
 2. Load both seasonal datasets using existing `utils.py` loaders (`load_processed` or `build_aligned_dataset`). Verify the data shape: 15-minute grid, per-device columns present.
