@@ -4,7 +4,7 @@ estimated_files: 2
 skills_used: []
 ---
 
-# T03: Learned device power model
+# T03: Implemented learned device power model, added utility helpers, and verified with notebook and test suite.
 
 1. Implement per-device power model: for each device and mode (heating/cooling), learn the typical power draw when active vs standby. Use simple approach: per-device mean power when active and when standby, grouped by mode, stored as a dict/DataFrame.
 2. The model must predict device power from control decisions (device on/off) without using future measured power_draw_kw — this is the leakage-safe foundation.

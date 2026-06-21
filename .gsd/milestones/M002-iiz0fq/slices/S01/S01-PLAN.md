@@ -32,7 +32,7 @@ Notebook cells use existing utils.py loaders (load_processed or build_aligned_da
   - Files: `backend/notebooks/07_event_based_device_control.ipynb`, `backend/notebooks/utils.py`
   - Verify: Run notebook cells through data pipeline section on both seasons; verify device-level and room-level DataFrames have expected columns and no NaN in critical fields. `uv run --project backend python -c "from backend.notebooks.utils import *; print('import ok')"` succeeds.
 
-- [ ] **T02: Grey-box thermal model training and validation** `est:2-3 hours`
+- [x] **T02: Implemented and verified grey-box thermal model training pipeline with coefficient check, fallback, and validation.** `est:2-3 hours`
   1. Implement the grey-box thermal model: `T_next = a*T_room + b*T_outside + c_heat*total_heating_power_kw - c_cool*total_cooling_power_kw + d*event_active`, trained separately for heating and cooling seasons using scikit-learn LinearRegression or Ridge.
   2. Time-based train/validation split: heating train earlier part of 2026-03-30→04-05, validate later event periods; cooling train earlier part of 2026-05-25→05-31, validate later events ~2026-05-27→05-29. Report exact timestamps.
   3. Implement coefficient stability/plausibility check: verify signs are physically reasonable (a > 0, b > 0, c_heat > 0, c_cool > 0 or near zero). If implausible, activate room-level fallback and log the reason.
@@ -42,7 +42,7 @@ Notebook cells use existing utils.py loaders (load_processed or build_aligned_da
   - Files: `backend/notebooks/07_event_based_device_control.ipynb`, `backend/notebooks/utils.py`
   - Verify: Notebook cells print thermal model coefficients for both seasons with plausibility verdict. Validation MAE < 2°C for both seasons (or documented reason for fallback).
 
-- [ ] **T03: Learned device power model** `est:1-2 hours`
+- [x] **T03: Implemented learned device power model, added utility helpers, and verified with notebook and test suite.** `est:1-2 hours`
   1. Implement per-device power model: for each device and mode (heating/cooling), learn the typical power draw when active vs standby. Use simple approach: per-device mean power when active and when standby, grouped by mode, stored as a dict/DataFrame.
   2. The model must predict device power from control decisions (device on/off) without using future measured power_draw_kw — this is the leakage-safe foundation.
   3. Train on the training portion of each season (same split as thermal model).

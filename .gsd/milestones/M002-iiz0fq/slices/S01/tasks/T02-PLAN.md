@@ -4,7 +4,7 @@ estimated_files: 2
 skills_used: []
 ---
 
-# T02: Grey-box thermal model training and validation
+# T02: Implemented and verified grey-box thermal model training pipeline with coefficient check, fallback, and validation.
 
 1. Implement the grey-box thermal model: `T_next = a*T_room + b*T_outside + c_heat*total_heating_power_kw - c_cool*total_cooling_power_kw + d*event_active`, trained separately for heating and cooling seasons using scikit-learn LinearRegression or Ridge.
 2. Time-based train/validation split: heating train earlier part of 2026-03-30→04-05, validate later event periods; cooling train earlier part of 2026-05-25→05-31, validate later events ~2026-05-27→05-29. Report exact timestamps.

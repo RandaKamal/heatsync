@@ -19,7 +19,9 @@ from notebooks.utils import (
     load_snapshots,
     load_space_events,
     predict_temperature,
+    predict_device_power,
     save_processed,
+    train_device_power_model,
     train_thermal_model,
     validate_columns,
 )
@@ -583,4 +585,52 @@ def test_predict_temperature() -> None:
     df_missing = df.drop(columns=["room_temp"])
     with pytest.raises(ValueError, match="Required features"):
         predict_temperature(model_dict, df_missing)
+
+
+def test_device_power_model() -> None:
+    """
+    Test training and predicting with the device power model.
+    """
+    idx = pd.date_range("2026-03-30 00:00:00", periods=6, freq="15min")
+    df = pd.DataFrame(
+        {
+            "device_1_power_kw": [10.0, 12.0, 0.05, 11.0, 0.05, 0.05],
+            "device_1_active": [1.0, 1.0, 0.0, 1.0, 0.0, 0.0],
+            "device_2_power_kw": [3.0, 3.5, 0.02, 3.2, 0.02, 0.02],
+            "device_2_active": [1.0, 1.0, 0.0, 1.0, 0.0, 0.0],
+        },
+        index=idx,
+    )
+    df.index.name = "timestamp"
+
+    # Train on first 4 steps (before 01:00:00)
+    split_ts = pd.Timestamp("2026-03-30 01:00:00")
+    model_dict = train_device_power_model(df, "heating", split_ts, expected_devices=2)
+
+    assert model_dict["season"] == "heating"
+    assert model_dict["expected_devices"] == 2
+    
+    params = model_dict["device_params"]
+    # For device 1 active: mean of [10.0, 12.0] = 11.0
+    # For device 1 standby: mean of [0.05] = 0.05
+    assert params["device_1"]["active_power"] == pytest.approx(11.0)
+    assert params["device_1"]["standby_power"] == pytest.approx(0.05)
+
+    # For device 2 active: mean of [3.0, 3.5, 3.2] = 3.233333
+    # For device 2 standby: mean of [0.02] = 0.02
+    assert params["device_2"]["active_power"] == pytest.approx(3.233333)
+    assert params["device_2"]["standby_power"] == pytest.approx(0.02)
+
+    # Predict on the whole df
+    preds_df = predict_device_power(model_dict, df)
+    assert f"device_1_predicted_power_kw" in preds_df.columns
+    assert f"device_2_predicted_power_kw" in preds_df.columns
+
+    # Verify prediction for step 4 (index 3), which is active (1.0)
+    # Expected device 1 power: 11.0
+    assert preds_df.loc[idx[3], "device_1_predicted_power_kw"] == pytest.approx(11.0)
+    # Verify prediction for step 5 (index 4), which is standby (0.0)
+    # Expected device 1 power: 0.05
+    assert preds_df.loc[idx[4], "device_1_predicted_power_kw"] == pytest.approx(0.05)
+
 

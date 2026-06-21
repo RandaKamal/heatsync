@@ -825,3 +825,63 @@ def predict_temperature(model_dict: dict[str, Any], df: pd.DataFrame) -> pd.Seri
         preds.loc[non_nan_mask] = model_dict["model"].predict(X_scaled)
     return preds
 
+
+def train_device_power_model(
+    df: pd.DataFrame,
+    season: str,
+    split_timestamp: pd.Timestamp,
+    expected_devices: int = 4,
+) -> dict[str, Any]:
+    """
+    Train a per-device power model: for each device, learn typical active vs standby power.
+    """
+    train_df = df[df.index < split_timestamp]
+    device_params = {}
+    for i in range(1, expected_devices + 1):
+        power_col = f"device_{i}_power_kw"
+        active_col = f"device_{i}_active"
+        if power_col not in df.columns or active_col not in df.columns:
+            device_params[f"device_{i}"] = {
+                "active_power": 0.0,
+                "standby_power": 0.0,
+            }
+            continue
+        active_vals = train_df.loc[train_df[active_col] == 1.0, power_col].dropna()
+        standby_vals = train_df.loc[train_df[active_col] == 0.0, power_col].dropna()
+
+        active_power = active_vals.mean() if not active_vals.empty else 0.0
+        standby_power = standby_vals.mean() if not standby_vals.empty else 0.0
+
+        device_params[f"device_{i}"] = {
+            "active_power": float(active_power),
+            "standby_power": float(standby_power),
+        }
+    return {
+        "season": season,
+        "device_params": device_params,
+        "expected_devices": expected_devices,
+    }
+
+
+def predict_device_power(
+    model_dict: dict[str, Any],
+    df: pd.DataFrame,
+) -> pd.DataFrame:
+    """
+    Predict device power from control decisions (device on/off) without using measured power.
+    """
+    expected_devices = model_dict.get("expected_devices", 4)
+    device_params = model_dict["device_params"]
+    preds_df = pd.DataFrame(index=df.index)
+    for i in range(1, expected_devices + 1):
+        active_col = f"device_{i}_active"
+        if active_col in df.columns:
+            active_decisions = df[active_col].fillna(0.0)
+        else:
+            active_decisions = pd.Series(0.0, index=df.index)
+        p_active = device_params[f"device_{i}"]["active_power"]
+        p_standby = device_params[f"device_{i}"]["standby_power"]
+        preds_df[f"device_{i}_predicted_power_kw"] = active_decisions * p_active + (1.0 - active_decisions) * p_standby
+    return preds_df
+
+
