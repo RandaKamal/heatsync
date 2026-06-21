@@ -21,6 +21,8 @@ from notebooks.utils import (
     predict_temperature,
     predict_device_power,
     save_processed,
+    save_model_artifacts,
+    load_model_artifacts,
     train_device_power_model,
     train_thermal_model,
     validate_columns,
@@ -632,5 +634,63 @@ def test_device_power_model() -> None:
     # Verify prediction for step 5 (index 4), which is standby (0.0)
     # Expected device 1 power: 0.05
     assert preds_df.loc[idx[4], "device_1_predicted_power_kw"] == pytest.approx(0.05)
+
+
+def test_model_artifacts_save_and_reload(tmp_path: pathlib.Path) -> None:
+    """
+    Test save_model_artifacts and load_model_artifacts functionality.
+    """
+    idx = pd.date_range("2026-03-30 00:00:00", periods=5, freq="15min")
+    df = pd.DataFrame(
+        {
+            "room_temp": [20.0] * 5,
+            "outside_temperature": [10.0] * 5,
+            "room_power_kw": [1.0] * 5,
+            "event_active": [0] * 5,
+        },
+        index=idx,
+    )
+    thermal_dict = train_thermal_model(df, "heating", pd.Timestamp("2026-03-30 00:45:00"))
+    
+    power_df = pd.DataFrame(
+        {
+            "device_1_power_kw": [10.0, 0.05],
+            "device_1_active": [1.0, 0.0],
+        },
+        index=idx[:2],
+    )
+    power_df.index.name = "timestamp"
+    power_dict = train_device_power_model(power_df, "heating", pd.Timestamp("2026-03-30 00:15:00"), expected_devices=1)
+    
+    save_model_artifacts(
+        artifacts_dir=tmp_path,
+        thermal_model_dict=thermal_dict,
+        device_power_model_dict=power_dict,
+        metrics={"mae": 0.1, "rmse": 0.2},
+        train_timestamps={"start": "2026-03-30T00:00:00", "end": "2026-03-30T00:30:00"},
+    )
+    
+    # Assert files exist in standard format and prefixed format
+    assert (tmp_path / "thermal_model.joblib").exists()
+    assert (tmp_path / "scaler.joblib").exists()
+    assert (tmp_path / "feature_columns.json").exists()
+    assert (tmp_path / "model_metadata.json").exists()
+    assert (tmp_path / "device_power_model.joblib").exists()
+    
+    assert (tmp_path / "heating_thermal_model.joblib").exists()
+    assert (tmp_path / "heating_scaler.joblib").exists()
+    assert (tmp_path / "heating_feature_columns.json").exists()
+    assert (tmp_path / "heating_model_metadata.json").exists()
+    assert (tmp_path / "heating_device_power_model.joblib").exists()
+
+    # Load with general season parameter
+    loaded_thermal, loaded_power = load_model_artifacts(tmp_path, season="heating")
+    
+    assert loaded_thermal["season"] == "heating"
+    assert loaded_thermal["is_fallback"] == thermal_dict["is_fallback"]
+    assert loaded_thermal["features"] == thermal_dict["features"]
+    assert loaded_power["season"] == "heating"
+    assert loaded_power["device_params"]["device_1"]["active_power"] == power_dict["device_params"]["device_1"]["active_power"]
+
 
 

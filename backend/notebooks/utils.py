@@ -5,8 +5,10 @@ Shared utilities for data preprocessing, clock alignment, and feature engineerin
 import logging
 import pathlib
 import warnings
+import json
 from typing import Any
 
+import joblib
 import pandas as pd
 from sklearn.linear_model import Ridge
 from sklearn.preprocessing import StandardScaler
@@ -883,5 +885,142 @@ def predict_device_power(
         p_standby = device_params[f"device_{i}"]["standby_power"]
         preds_df[f"device_{i}_predicted_power_kw"] = active_decisions * p_active + (1.0 - active_decisions) * p_standby
     return preds_df
+
+
+def save_model_artifacts(
+    artifacts_dir: str | pathlib.Path,
+    thermal_model_dict: dict[str, Any],
+    device_power_model_dict: dict[str, Any],
+    metrics: dict[str, Any] | None = None,
+    train_timestamps: dict[str, Any] | None = None,
+) -> None:
+    """
+    Save trained model artifacts:
+    - thermal_model.joblib
+    - scaler.joblib
+    - feature_columns.json
+    - model_metadata.json
+    - device_power_model.joblib
+
+    To support both seasons, we save both season-prefixed files and the standard files.
+    """
+    dir_path = pathlib.Path(artifacts_dir)
+    dir_path.mkdir(parents=True, exist_ok=True)
+
+    season = thermal_model_dict.get("season", "heating")
+
+    # Construct metadata
+    metadata = {
+        "season": season,
+        "train_timestamps": train_timestamps or {},
+        "coefficients": {
+            "a": thermal_model_dict.get("a"),
+            "b": thermal_model_dict.get("b"),
+            "c_heat": thermal_model_dict.get("c_heat"),
+            "c_cool": thermal_model_dict.get("c_cool"),
+            "d": thermal_model_dict.get("d"),
+            "intercept": thermal_model_dict.get("intercept"),
+        },
+        "is_fallback": thermal_model_dict.get("is_fallback", False),
+        "fallback_reason": thermal_model_dict.get("fallback_reason"),
+        "metrics": metrics or {},
+        "features": thermal_model_dict.get("features", []),
+        "device_power_model_params": device_power_model_dict.get("device_params", {}),
+    }
+
+    # Files to write
+    files_to_write = [
+        # standard filenames
+        ("thermal_model.joblib", thermal_model_dict["model"], "joblib"),
+        ("scaler.joblib", thermal_model_dict["scaler"], "joblib"),
+        ("feature_columns.json", thermal_model_dict["features"], "json"),
+        ("model_metadata.json", metadata, "json"),
+        ("device_power_model.joblib", device_power_model_dict, "joblib"),
+        # season-prefixed filenames for notebooks/multi-season safety
+        (f"{season}_thermal_model.joblib", thermal_model_dict["model"], "joblib"),
+        (f"{season}_scaler.joblib", thermal_model_dict["scaler"], "joblib"),
+        (f"{season}_feature_columns.json", thermal_model_dict["features"], "json"),
+        (f"{season}_model_metadata.json", metadata, "json"),
+        (f"{season}_device_power_model.joblib", device_power_model_dict, "joblib"),
+    ]
+
+    for filename, obj, format_type in files_to_write:
+        file_path = dir_path / filename
+        if format_type == "joblib":
+            joblib.dump(obj, file_path)
+        elif format_type == "json":
+            with open(file_path, "w") as f:
+                json.dump(obj, f, indent=2)
+
+
+def load_model_artifacts(
+    artifacts_dir: str | pathlib.Path,
+    season: str | None = None,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """
+    Load saved model artifacts and reconstruct model dictionaries:
+    - thermal_model_dict
+    - device_power_model_dict
+    """
+    dir_path = pathlib.Path(artifacts_dir)
+
+    # Decide prefix
+    prefix = f"{season}_" if season else ""
+
+    # Check if files exist. Fall back to unprefixed if prefixed don't exist.
+    thermal_model_path = dir_path / f"{prefix}thermal_model.joblib"
+    if season and not thermal_model_path.exists():
+        # Fallback to unprefixed
+        thermal_model_path = dir_path / "thermal_model.joblib"
+        scaler_path = dir_path / "scaler.joblib"
+        metadata_path = dir_path / "model_metadata.json"
+        power_model_path = dir_path / "device_power_model.joblib"
+    else:
+        scaler_path = dir_path / f"{prefix}scaler.joblib"
+        metadata_path = dir_path / f"{prefix}model_metadata.json"
+        power_model_path = dir_path / f"{prefix}device_power_model.joblib"
+
+    if not thermal_model_path.exists():
+        raise FileNotFoundError(f"Thermal model file not found: {thermal_model_path}")
+    if not scaler_path.exists():
+        raise FileNotFoundError(f"Scaler file not found: {scaler_path}")
+    if not metadata_path.exists():
+        raise FileNotFoundError(f"Model metadata file not found: {metadata_path}")
+    if not power_model_path.exists():
+        raise FileNotFoundError(f"Device power model file not found: {power_model_path}")
+
+    # Load objects
+    model = joblib.load(thermal_model_path)
+    scaler = joblib.load(scaler_path)
+    with open(metadata_path, "r") as f:
+        metadata = json.load(f)
+    device_power_model_dict = joblib.load(power_model_path)
+
+    # Reconstruct thermal_model_dict
+    coefs = metadata.get("coefficients", {})
+    thermal_model_dict = {
+        "model": model,
+        "scaler": scaler,
+        "season": metadata.get("season", season),
+        "is_fallback": metadata.get("is_fallback", False),
+        "fallback_reason": metadata.get("fallback_reason"),
+        "a": coefs.get("a"),
+        "b": coefs.get("b"),
+        "c_heat": coefs.get("c_heat"),
+        "c_cool": coefs.get("c_cool"),
+        "d": coefs.get("d"),
+        "intercept": coefs.get("intercept"),
+        "features": metadata.get("features", ["room_temp", "outside_temperature", "room_power_kw", "event_active"] if not metadata.get("is_fallback") else ["room_temp"]),
+    }
+
+    # If features not directly in metadata top-level, check if we saved feature_columns.json
+    feature_cols_path = dir_path / f"{prefix}feature_columns.json"
+    if not feature_cols_path.exists() and season:
+        feature_cols_path = dir_path / "feature_columns.json"
+    if feature_cols_path.exists():
+        with open(feature_cols_path, "r") as f:
+            thermal_model_dict["features"] = json.load(f)
+
+    return thermal_model_dict, device_power_model_dict
 
 
