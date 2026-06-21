@@ -183,3 +183,4 @@ tmp/
 temp/
 .cache/
 event_based_device_control_task.md
+.claude
