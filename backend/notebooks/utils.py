@@ -7,6 +7,8 @@ import pathlib
 import warnings
 import json
 from typing import Any
+from dataclasses import dataclass, asdict, field
+from datetime import datetime
 
 import joblib
 import pandas as pd
@@ -1022,5 +1024,241 @@ def load_model_artifacts(
             thermal_model_dict["features"] = json.load(f)
 
     return thermal_model_dict, device_power_model_dict
+
+
+@dataclass
+class EventControlConfig:
+    mode: str  # "heating" or "cooling"
+    min_temp: float
+    max_temp: float
+    precondition_hours: float = 2.0
+
+    def validate(self) -> None:
+        """
+        Validate the event-control configuration.
+        """
+        if self.mode not in ["heating", "cooling"]:
+            raise ValueError(f"Invalid mode '{self.mode}'. Expected 'heating' or 'cooling'.")
+        if self.min_temp >= self.max_temp:
+            raise ValueError(f"Invalid comfort band: min_temp ({self.min_temp}) must be less than max_temp ({self.max_temp}).")
+        if self.precondition_hours < 0.0:
+            raise ValueError("precondition_hours must be non-negative.")
+
+
+@dataclass
+class ConsolidatedEventWindow:
+    window_id: str
+    starts_at: datetime
+    ends_at: datetime
+    original_event_ids: list[str] = field(default_factory=list)
+    rationale: str = ""
+
+
+@dataclass
+class ScheduleRow:
+    event_id: str
+    mode: str
+    start_time: datetime
+    device_1_on: int
+    device_2_on: int
+    device_3_on: int
+    device_4_on: int
+    target_temp: float
+    predicted_temp_at_start: float
+    expected_kwh: float
+    expected_cost: float
+    expected_co2: float
+    is_feasible: bool = True
+    violation_celsius: float = 0.0
+    selection_reason: str = ""
+
+
+def validate_optimizer_inputs(
+    mode: str,
+    min_temp: float,
+    max_temp: float,
+    precondition_hours: float = 2.0,
+) -> None:
+    """
+    Validate optimizer inputs (mode, comfort bands, preconditioning hours).
+    """
+    config = EventControlConfig(
+        mode=mode,
+        min_temp=min_temp,
+        max_temp=max_temp,
+        precondition_hours=precondition_hours
+    )
+    config.validate()
+
+
+def get_device_id_mapping(df: pd.DataFrame, expected_devices: int = 4) -> dict[str, int]:
+    """
+    Get deterministic mapping of device ID strings to 1-based indices (1 to expected_devices).
+    """
+    device_ids = _ordered_device_ids(df, expected_devices)
+    return {dev_id: idx for idx, dev_id in enumerate(device_ids, start=1)}
+
+
+def discover_device_columns(df: pd.DataFrame, expected_devices: int = 4) -> dict[str, dict[str, str]]:
+    """
+    Discover and map device indices to their respective power and active column names in a wide DataFrame.
+    Returns a dict mapping e.g., 'device_1' -> {'power': 'device_1_power_kw', 'active': 'device_1_active'}
+    """
+    mapping = {}
+    for i in range(1, expected_devices + 1):
+        power_col = f"device_{i}_power_kw"
+        active_col = f"device_{i}_active"
+        if power_col in df.columns and active_col in df.columns:
+            mapping[f"device_{i}"] = {
+                "power": power_col,
+                "active": active_col
+            }
+    return mapping
+
+
+def extract_events_from_frame(df: pd.DataFrame, flag_col: str = "occupancy_flag") -> pd.DataFrame:
+    """
+    Extract event windows (starts_at, ends_at) from a processed/aligned DataFrame
+    where flag_col (default: 'occupancy_flag') is 1.
+    """
+    if flag_col not in df.columns:
+        raise ValueError(f"Column '{flag_col}' not found in DataFrame.")
+    
+    if not isinstance(df.index, pd.DatetimeIndex):
+        if "timestamp" in df.columns:
+            df_copy = df.copy()
+            df_copy["timestamp"] = pd.to_datetime(df_copy["timestamp"])
+            df_copy.set_index("timestamp", inplace=True)
+        else:
+            raise ValueError("DataFrame index must be a DatetimeIndex or contain a 'timestamp' column.")
+    else:
+        df_copy = df.copy()
+
+    # De-duplicate by timestamp index to keep a clean 1D sequence of occupancy flags
+    df_copy = df_copy[[flag_col]].sort_index()
+    df_copy = df_copy[~df_copy.index.duplicated(keep="first")]
+
+    is_event = (df_copy[flag_col] == 1)
+    if not is_event.any():
+        return pd.DataFrame(columns=["starts_at", "ends_at"])
+
+    # Find contiguous blocks of 1s
+    # Shift and cumsum to identify contiguous group IDs
+    group_ids = (is_event != is_event.shift()).cumsum()
+    event_groups = df_copy[is_event].groupby(group_ids[is_event])
+    
+    extracted = []
+    for _, group in event_groups:
+        starts_at = group.index.min()
+        ends_at = group.index.max() + pd.Timedelta(minutes=15)
+        extracted.append({
+            "starts_at": starts_at,
+            "ends_at": ends_at
+        })
+        
+    return pd.DataFrame(extracted, columns=["starts_at", "ends_at"])
+
+
+def consolidate_event_windows(
+    events_df: pd.DataFrame,
+    merge_threshold_minutes: float = 60.0
+) -> list[ConsolidatedEventWindow]:
+    """
+    Consolidate space events by merging duplicate, overlapping, or close back-to-back windows.
+    
+    Args:
+        events_df: pd.DataFrame with ['starts_at', 'ends_at'] columns, and optionally ['event_id'].
+                   If 'event_id' is missing, it will auto-assign sequential IDs ('E01', 'E02', etc.).
+        merge_threshold_minutes: Threshold in minutes. If the gap between two event windows is <= this threshold,
+                                 they are merged into a single consolidated window.
+                                 Must be non-negative.
+    
+    Returns:
+        List of ConsolidatedEventWindow dataclass instances.
+    """
+    if merge_threshold_minutes < 0:
+        raise ValueError("merge_threshold_minutes must be non-negative.")
+        
+    required = ["starts_at", "ends_at"]
+    for col in required:
+        if col not in events_df.columns:
+            raise ValueError(f"Missing required column: {col}")
+            
+    if events_df.empty:
+        return []
+        
+    df = events_df.copy()
+    df["starts_at"] = pd.to_datetime(df["starts_at"])
+    df["ends_at"] = pd.to_datetime(df["ends_at"])
+    
+    # Sort events by starts_at, then ends_at
+    df = df.sort_values(by=["starts_at", "ends_at"]).reset_index(drop=True)
+    
+    if "event_id" not in df.columns:
+        df["event_id"] = [f"E{i+1:02d}" for i in range(len(df))]
+    else:
+        df["event_id"] = df["event_id"].astype(str)
+    
+    consolidated = []
+    current_start = df.loc[0, "starts_at"]
+    current_end = df.loc[0, "ends_at"]
+    current_ids = [df.loc[0, "event_id"]]
+    
+    for i in range(1, len(df)):
+        row = df.iloc[i]
+        start = row["starts_at"]
+        end = row["ends_at"]
+        ev_id = row["event_id"]
+        
+        # Calculate gap in minutes between current_end and next start
+        gap_minutes = (start - current_end).total_seconds() / 60.0
+        
+        if gap_minutes <= merge_threshold_minutes:
+            # Merge! Update current_end if this event ends later
+            current_end = max(current_end, end)
+            current_ids.append(ev_id)
+        else:
+            # Save current and start a new consolidated window
+            consolidated.append({
+                "current_start": current_start,
+                "current_end": current_end,
+                "current_ids": current_ids
+            })
+            current_start = start
+            current_end = end
+            current_ids = [ev_id]
+            
+    # Add the last one
+    consolidated.append({
+        "current_start": current_start,
+        "current_end": current_end,
+        "current_ids": current_ids
+    })
+    
+    # Convert to final structured format with rationale
+    result = []
+    for idx, item in enumerate(consolidated, start=1):
+        w_id = f"W{idx:02d}"
+        ids = item["current_ids"]
+        start = item["current_start"]
+        end = item["current_end"]
+        
+        # Keep original order or sort IDs for deterministic output
+        ids = sorted(list(set(ids)))
+        
+        if len(ids) == 1:
+            rat = f"Window contains single event: {ids[0]}."
+        else:
+            rat = f"Merged {len(ids)} events due to overlap or close proximity: {', '.join(ids)}."
+            
+        result.append(ConsolidatedEventWindow(
+            window_id=w_id,
+            starts_at=start,
+            ends_at=end,
+            original_event_ids=ids,
+            rationale=rat
+        ))
+        
+    return result
 
 

@@ -693,4 +693,143 @@ def test_model_artifacts_save_and_reload(tmp_path: pathlib.Path) -> None:
     assert loaded_power["device_params"]["device_1"]["active_power"] == power_dict["device_params"]["device_1"]["active_power"]
 
 
+def test_optimizer_contracts_and_inputs() -> None:
+    from notebooks.utils import EventControlConfig, validate_optimizer_inputs
+    
+    # Valid config
+    config = EventControlConfig(mode="heating", min_temp=18.0, max_temp=22.0, precondition_hours=2.0)
+    config.validate()
+    
+    # Invalid mode
+    with pytest.raises(ValueError, match="Invalid mode"):
+        validate_optimizer_inputs(mode="invalid_mode", min_temp=18.0, max_temp=22.0)
+        
+    # Invalid comfort band
+    with pytest.raises(ValueError, match="Invalid comfort band"):
+        validate_optimizer_inputs(mode="heating", min_temp=22.0, max_temp=18.0)
+        
+    # Negative precondition hours
+    with pytest.raises(ValueError, match="precondition_hours must be non-negative"):
+        validate_optimizer_inputs(mode="heating", min_temp=18.0, max_temp=22.0, precondition_hours=-1.0)
+
+
+def test_device_discovery_and_ordering() -> None:
+    from notebooks.utils import get_device_id_mapping, discover_device_columns
+    
+    # Test device mapping ordering
+    df_devices = pd.DataFrame({
+        "device_id": [
+            "unknown-device-id",
+            "1c893f75-4599-4402-9d4c-1017aa858fa8",  # Second in KNOWN_DEVICE_ORDER
+            "bdaf0e14-2cd1-43c8-b9ea-b3c90309f773",  # First in KNOWN_DEVICE_ORDER
+        ]
+    })
+    
+    mapping = get_device_id_mapping(df_devices, expected_devices=4)
+    # Expected ordering: KNOWN ones first, then unknowns
+    # First: bdaf0e14-2cd1-43c8-b9ea-b3c90309f773
+    # Second: 1c893f75-4599-4402-9d4c-1017aa858fa8
+    # Third: unknown-device-id
+    # Fourth: e72fea56-abe7-4d3f-a0ed-1e6b6c462157 (from KNOWN_DEVICE_ORDER because we need 4)
+    assert mapping["bdaf0e14-2cd1-43c8-b9ea-b3c90309f773"] == 1
+    assert mapping["1c893f75-4599-4402-9d4c-1017aa858fa8"] == 2
+    assert mapping["unknown-device-id"] == 3
+    assert mapping["e72fea56-abe7-4d3f-a0ed-1e6b6c462157"] == 4
+    
+    # Test discover_device_columns
+    df_wide = pd.DataFrame({
+        "device_1_power_kw": [1.0, 2.0],
+        "device_1_active": [1.0, 0.0],
+        "device_2_power_kw": [0.5, 0.5],
+        "device_2_active": [0.0, 0.0],
+        # device 3 power is missing active, device 4 is completely missing
+        "device_3_power_kw": [1.5, 1.5],
+    })
+    cols_map = discover_device_columns(df_wide, expected_devices=4)
+    assert "device_1" in cols_map
+    assert cols_map["device_1"]["power"] == "device_1_power_kw"
+    assert cols_map["device_1"]["active"] == "device_1_active"
+    assert "device_2" in cols_map
+    assert "device_3" not in cols_map
+    assert "device_4" not in cols_map
+
+
+def test_extract_events_from_frame() -> None:
+    from notebooks.utils import extract_events_from_frame
+    
+    # Test typical extraction with index
+    times = pd.date_range("2026-03-30 00:00:00", periods=8, freq="15min")
+    df = pd.DataFrame({
+        "occupancy_flag": [0, 1, 1, 0, 0, 1, 0, 0]
+    }, index=times)
+    
+    events = extract_events_from_frame(df, flag_col="occupancy_flag")
+    assert len(events) == 2
+    # First event: index 1 and 2 (00:15 and 00:30) -> start: 00:15, end: 00:30 + 15m = 00:45
+    assert events.iloc[0]["starts_at"] == pd.Timestamp("2026-03-30 00:15:00")
+    assert events.iloc[0]["ends_at"] == pd.Timestamp("2026-03-30 00:45:00")
+    # Second event: index 5 (01:15) -> start: 01:15, end: 01:30
+    assert events.iloc[1]["starts_at"] == pd.Timestamp("2026-03-30 01:15:00")
+    assert events.iloc[1]["ends_at"] == pd.Timestamp("2026-03-30 01:30:00")
+    
+    # Missing flag column raises ValueError
+    with pytest.raises(ValueError, match="not found in DataFrame"):
+        extract_events_from_frame(df, flag_col="non_existent")
+        
+    # Non-datetime index without timestamp column raises ValueError
+    df_no_dt = pd.DataFrame({"occupancy_flag": [1]}, index=[0])
+    with pytest.raises(ValueError, match="must be a DatetimeIndex or contain a 'timestamp' column"):
+        extract_events_from_frame(df_no_dt)
+
+
+def test_consolidate_event_windows() -> None:
+    from notebooks.utils import consolidate_event_windows, ConsolidatedEventWindow
+    
+    # Create test events
+    events_df = pd.DataFrame([
+        # Duplicate events
+        {"event_id": "E1", "starts_at": "2026-03-30 08:00:00", "ends_at": "2026-03-30 09:00:00"},
+        {"event_id": "E2", "starts_at": "2026-03-30 08:00:00", "ends_at": "2026-03-30 09:00:00"},
+        # Overlapping event
+        {"event_id": "E3", "starts_at": "2026-03-30 08:30:00", "ends_at": "2026-03-30 10:00:00"},
+        # Close back-to-back (gap = 30 minutes <= 60 minutes)
+        {"event_id": "E4", "starts_at": "2026-03-30 10:30:00", "ends_at": "2026-03-30 11:30:00"},
+        # Separated event (gap = 90 minutes > 60 minutes)
+        {"event_id": "E5", "starts_at": "2026-03-30 13:00:00", "ends_at": "2026-03-30 14:00:00"},
+    ])
+    
+    # Consolidate with 60 minutes threshold
+    consolidated = consolidate_event_windows(events_df, merge_threshold_minutes=60.0)
+    
+    assert len(consolidated) == 2
+    
+    # First consolidated window: E1, E2, E3, E4 merged
+    # Starts at 08:00:00, ends at 11:30:00
+    w1 = consolidated[0]
+    assert isinstance(w1, ConsolidatedEventWindow)
+    assert w1.window_id == "W01"
+    assert w1.starts_at == pd.Timestamp("2026-03-30 08:00:00")
+    assert w1.ends_at == pd.Timestamp("2026-03-30 11:30:00")
+    assert w1.original_event_ids == ["E1", "E2", "E3", "E4"]
+    assert "Merged 4 events" in w1.rationale
+    
+    # Second consolidated window: E5
+    w2 = consolidated[1]
+    assert w2.window_id == "W02"
+    assert w2.starts_at == pd.Timestamp("2026-03-30 13:00:00")
+    assert w2.ends_at == pd.Timestamp("2026-03-30 14:00:00")
+    assert w2.original_event_ids == ["E5"]
+    assert "single event" in w2.rationale
+    
+    # Negative merge threshold raises ValueError
+    with pytest.raises(ValueError, match="merge_threshold_minutes must be non-negative"):
+        consolidate_event_windows(events_df, merge_threshold_minutes=-10.0)
+        
+    # Missing columns raises ValueError
+    df_bad = pd.DataFrame({"starts_at": ["2026-03-30 08:00:00"]})
+    with pytest.raises(ValueError, match="Missing required column"):
+        consolidate_event_windows(df_bad)
+
+
+
 
