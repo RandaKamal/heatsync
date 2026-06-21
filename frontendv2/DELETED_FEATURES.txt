@@ -85,3 +85,26 @@ Recorded when streamlining the Building Profile wizard and view-specific control
 - "Room condition" legend panel (top-left of the customer-view map,
   App.tsx `.map-legend`) — removed along with the now-unused
   `legendStatuses` constant.
+
+── FAULT-DEMO ARCHITECTURE REPLACED (2026-06-21) ─────────────────────────────
+Recorded when adding the Fault Simulation and Incident Replay feature
+(shared customer/LB-Energy incident state machine, see
+src/simulation/incident/). The old hardcoded 60-second demo was deleted
+wholesale rather than kept alongside the new one, to avoid two independent
+fault-demo architectures — see the delivery report in the PR/session notes
+for the full design rationale.
+
+- `src/hooks/useFailureSimulation.ts`, `src/simulation/types.ts`,
+  `src/simulation/failureScenario.ts`,
+  `src/components/ui/FailureSimulationPanel.tsx` — removed entirely.
+  This was already stale: it referenced rooms `G03`/`F03` and devices
+  `ORION-03`/`S-F03` that no longer exist in `data/mockCampus.ts` (the
+  campus was simplified at some earlier point and this file was never
+  updated), so those branches were silently no-oping on a detached clone.
+  Replaced by `src/hooks/useIncidentReplay.ts`, which keeps the same
+  "always returns the full campus rooms/devices frame" contract that
+  `App.tsx`'s `CampusCanvas`/`CampusSidebar` depend on.
+- The "Demo scenario" floating button (App.tsx, customer view only) —
+  replaced by a "Fault simulation" button available from both Customer
+  and LB Energy Service views, opening the new incident-replay controls
+  + per-view panel.

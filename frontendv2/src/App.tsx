@@ -2,7 +2,10 @@ import { useCallback, useEffect, useState } from 'react'
 import { CampusCanvas } from './components/scene/CampusCanvas'
 import { CampusSidebar } from './components/ui/CampusSidebar'
 import { ControlTimeline } from './components/ui/ControlTimeline'
-import { FailureSimulationPanel } from './components/ui/FailureSimulationPanel'
+import { CustomerIncidentPanel } from './components/incident/CustomerIncidentPanel'
+import { IncidentReplayControls } from './components/incident/IncidentReplayControls'
+import { LbEnergyIncidentPanel } from './components/incident/LbEnergyIncidentPanel'
+import { PresenterCue } from './components/incident/PresenterCue'
 import { OptimizeModal } from './components/ui/OptimizeModal'
 import type { OptimizeSuggestion } from './components/ui/OptimizeModal'
 import { PokesPanel } from './components/ui/PokesPanel'
@@ -18,7 +21,7 @@ import {
   roomLoadHeatmap,
   weatherForecast as mockWeatherForecast,
 } from './data/mockCampus'
-import { useFailureSimulation } from './hooks/useFailureSimulation'
+import { useIncidentReplay } from './hooks/useIncidentReplay'
 import { useBackendStatus } from './hooks/useBackendStatus'
 import {
   applyOptimization,
@@ -67,10 +70,10 @@ function App() {
   const [anomalyAlerts, setAnomalyAlerts]     = useState<Alert[]>([])
   const [notifications, setNotifications]     = useState<Notification[]>([])
 
-  // ── Simulation (demo campus) ──────────────────────────────────────────────
-  const simulation = useFailureSimulation()
-  const currentDevices = simulation.devices
-  const currentRooms   = simulation.rooms
+  // ── Fault simulation & incident replay (demo campus) ──────────────────────
+  const incident = useIncidentReplay(view)
+  const currentDevices = incident.devices
+  const currentRooms   = incident.rooms
 
   // ── Real backend status (LB Energy service view) ──────────────────────────
   const { rooms: backendRooms, stats, connected, scenarios } = useBackendStatus()
@@ -87,18 +90,15 @@ function App() {
     fetchNotifications().then(setNotifications).catch(console.error)
   }, [])
 
-  // ── Simulation auto-selects devices ──────────────────────────────────────
+  // ── Incident replay auto-selects the affected device (customer view only —
+  // the LB Energy sidebar uses real backend device IDs, a separate namespace) ─
   useEffect(() => {
-    if (
-      simulation.status.phase === 'idle' ||
-      simulation.status.phase === 'normal' ||
-      simulation.status.phase === 'occupancy-adaptation'
-    ) return
-    if (simulation.status.targetDeviceId) {
-      setSelectedDeviceId(simulation.status.targetDeviceId)
+    if (view !== 'customer') return
+    if (incident.incidentState.deviceStatuses['device-1'] === 'unavailable') {
+      setSelectedDeviceId(incident.affectedMockDeviceId)
       setSelectedRoomId(null)
     }
-  }, [simulation.status.phase, simulation.status.targetDeviceId])
+  }, [view, incident.incidentState.deviceStatuses, incident.affectedMockDeviceId])
 
   // ── Selection handlers ────────────────────────────────────────────────────
   const handleSelectDevice = (id: string) => {
@@ -110,7 +110,7 @@ function App() {
   const handleClearSelection = () => {
     setSelectedDeviceId(null); setSelectedRoomId(null)
   }
-  const handleReset = () => { handleClearSelection(); simulation.reset() }
+  const handleReset = () => { handleClearSelection(); incident.controls.reset() }
 
   // ── Event management (synced to backend) ─────────────────────────────────
   const handleAddEvent = useCallback(async (event: RoomEvent) => {
@@ -254,15 +254,38 @@ function App() {
               />
             )}
 
-            {/* Demo scenario button — customer view only */}
-            {view === 'customer' && (
+            {/* Fault simulation & incident replay — available from Customer and LB Energy views
+                (this branch only renders when view !== 'profile', see the ternary above) */}
+            {
               simOpen ? (
-                <FailureSimulationPanel
-                  status={simulation.status}
-                  onStepToNextPhase={simulation.stepToNextPhase}
-                  onReset={handleReset}
-                  onDismiss={() => setSimOpen(false)}
-                />
+                <>
+                  <div className="incident-stack">
+                    <IncidentReplayControls
+                      currentStage={incident.currentStage}
+                      stageIndex={incident.stageIndex}
+                      stageCount={incident.stageCount}
+                      playing={incident.playing}
+                      speed={incident.speed}
+                      presenterCuesOn={incident.presenterCuesOn}
+                      onClose={() => setSimOpen(false)}
+                      controls={{ ...incident.controls, reset: handleReset }}
+                    />
+                    {view === 'customer' && (
+                      <CustomerIncidentPanel
+                        incidentState={incident.incidentState}
+                        onClose={() => setSimOpen(false)}
+                      />
+                    )}
+                    {view === 'service' && (
+                      <LbEnergyIncidentPanel
+                        incidentState={incident.incidentState}
+                        onClose={() => setSimOpen(false)}
+                        controls={incident.controls}
+                      />
+                    )}
+                  </div>
+                  <PresenterCue cue={incident.presenterCue} visible={incident.presenterCuesOn} />
+                </>
               ) : (
                 <button
                   type="button"
@@ -285,10 +308,10 @@ function App() {
                     borderLeft: '9px solid #38bdf8',
                     display: 'inline-block',
                   }} />
-                  Demo scenario
+                  Fault simulation
                 </button>
               )
-            )}
+            }
 
             {/* Sidebar — view-dependent */}
             {view === 'customer' ? (
@@ -296,10 +319,10 @@ function App() {
                 rooms={currentRooms}
                 devices={currentDevices}
                 selectedDeviceId={selectedDeviceId}
-                buildingTelemetry={simulation.buildingTelemetry}
+                buildingTelemetry={incident.buildingTelemetry}
                 weatherForecast={mockWeatherForecast}
                 roomEvents={roomEvents}
-                controlDecisions={simulation.controlDecisions}
+                controlDecisions={incident.controlDecisions}
                 roomLoadHeatmap={roomLoadHeatmap}
                 impactByDevice={impactByDevice}
                 onSelectDevice={handleSelectDevice}

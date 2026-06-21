@@ -13,6 +13,7 @@ import {
 } from 'recharts'
 import type { BackendHeatPump, BackendRoom, BackendStats, AnomalyScenario } from '../../hooks/useBackendStatus'
 import { decodeErrorRegisters } from '../../utils/errorRegisters'
+import { SourceBadge } from './SourceBadge'
 
 const SPACE_ID = '3dbed10b-9e88-4163-916d-3182e2ecc69f'
 
@@ -27,27 +28,6 @@ const STATUS_COLOR: Record<string, string> = {
   idle:    '#64748b',
   warning: '#f59e0b',
   error:   '#ef4444',
-}
-
-// Source badge component
-function SourceBadge({ label }: { label: string }) {
-  const colors: Record<string, string> = {
-    Measured:   '#2dd4bf',
-    Derived:    '#818cf8',
-    Scheduled:  '#38bdf8',
-    Estimated:  '#94a3b8',
-    Simulated:  '#fb923c',
-    Unavailable: '#475569',
-  }
-  const color = colors[label] ?? '#64748b'
-  return (
-    <span
-      className="source-badge"
-      style={{ borderColor: `${color}55`, color, background: `${color}11` }}
-    >
-      {label}
-    </span>
-  )
 }
 
 // Temperature history chart with comfort band
