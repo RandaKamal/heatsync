@@ -23,7 +23,7 @@
   - Files: `backend/tests/test_event_control_reporting.py`, `backend/tests/test_notebooks.py`
   - Verify: PYTHONPATH=. uv run --project backend pytest backend/tests/test_event_control_reporting.py backend/tests/test_notebooks.py
 
-- [ ] **T03: Fix Typing and Linting (Mypy, Ruff, Bandit)** `est:1.5 hours`
+- [x] **T03: Fixed all ruff lint/format errors and verified type correctness with mypy and security checks with bandit.** `est:1.5 hours`
   Run the full suite of backend quality gates (ruff check, ruff format, mypy, bandit) against `backend/notebooks/utils.py`, `backend/tests/`, and all newly added helpers. Fix any typing or linting violations that emerge from the M002 slices. Ensure type hints are accurate and missing docstrings are added if required by the linter.
   - Files: `backend/notebooks/utils.py`, `backend/tests/test_notebooks.py`, `backend/tests/test_event_control_reporting.py`
   - Verify: uv run --project backend ruff check backend && uv run --project backend ruff format --check backend && uv run --project backend mypy --config-file backend/pyproject.toml backend && uv run --project backend bandit -q -r backend -x backend/.venv,backend/tests

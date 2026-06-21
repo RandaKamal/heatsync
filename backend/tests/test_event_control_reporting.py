@@ -199,8 +199,12 @@ def test_augmented_report_preserves_edge_case_rows_and_statuses() -> None:
     assert report.set_index("event_id").loc["E_missed", "report_status"] == "comfort_missed"
     assert report.set_index("event_id").loc["E_negative", "report_status"] == "negative_savings"
     assert report.set_index("event_id").loc["E_neutral", "report_status"] == "neutral_savings"
-    assert float(cast(Any, report.set_index("event_id").loc["E_negative", "energy_savings_kwh"])) < 0.0
-    assert float(cast(Any, report.set_index("event_id").loc["E_neutral", "energy_savings_kwh"])) == pytest.approx(0.0)
+    assert (
+        float(cast(Any, report.set_index("event_id").loc["E_negative", "energy_savings_kwh"])) < 0.0
+    )
+    assert float(
+        cast(Any, report.set_index("event_id").loc["E_neutral", "energy_savings_kwh"])
+    ) == pytest.approx(0.0)
 
 
 def test_reporting_helpers_reject_malformed_inputs() -> None:

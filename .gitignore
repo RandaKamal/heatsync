@@ -10,6 +10,8 @@ __pycache__/
 .coverage.*
 mutants/
 .bg-shell/
+# Notebook execution outputs (regenerable artifacts)
+backend/notebooks/executed*.ipynb
 # GSD project artifacts are tracked. Keep local/session/runtime/telemetry artifacts out of Git.
 .gsd/runtime/
 .gsd/activity/

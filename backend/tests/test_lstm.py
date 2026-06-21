@@ -1,9 +1,10 @@
 import numpy as np
 import pytest
 import torch
-from notebooks.utils import load_processed
 from torch import nn
 from torch.utils.data import DataLoader, TensorDataset
+
+from notebooks.utils import load_processed
 
 
 class LSTMForecaster(nn.Module):

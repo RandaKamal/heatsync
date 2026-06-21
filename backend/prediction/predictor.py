@@ -16,6 +16,7 @@ from datetime import UTC, datetime, timedelta
 from zoneinfo import ZoneInfo
 
 import pandas as pd
+
 from api.weather import DEFAULT_LAT, DEFAULT_LON, fetch_forecast
 from comfort.model import (
     MAX_EVENT_POWER_FRACTION,

@@ -98,6 +98,13 @@ MAX_INTERPOLATION_GAP = 2
 WEEKEND_START_DAY = 5
 THRESHOLD_REQUIRED = 0.5
 SECONDS_PER_HOUR = 3_600.0
+# Schedule formatting currently assumes a fixed four-device layout.
+EXPECTED_SCHEDULE_DEVICES = 4
+# Minimum number of timestamps needed to infer a sampling interval.
+MIN_INTERVAL_POINTS = 2
+# Numerical tolerances (non-behavioural; named to avoid inline magic values).
+COMFORT_FEASIBILITY_TOLERANCE_C = 1e-9
+BASELINE_SAVINGS_EPSILON = 1e-12
 
 
 def validate_columns(df: pd.DataFrame, file_type: str, file_path: str) -> None:
@@ -1300,10 +1307,9 @@ def get_historical_value(df: pd.DataFrame, col: str, ts: pd.Timestamp, default: 
             val = val.iloc[0]
         if not pd.isna(val):
             return float(cast(Any, val))
-    # Find closest timestamp
+    # Find closest timestamp (resolution-independent; avoids asi8/.value unit mismatch)
     dt_index: pd.DatetimeIndex = cast(pd.DatetimeIndex, df.index)
-    diffs = np.abs(cast(Any, dt_index).asi8 - cast(Any, ts).value)
-    closest_idx = int(diffs.argmin())
+    closest_idx = int(dt_index.get_indexer(pd.Index([ts]), method="nearest")[0])
     val = df.iloc[closest_idx][col]
     if not pd.isna(val):
         return float(cast(Any, val))
@@ -1384,7 +1390,7 @@ def simulate_preconditioning(
 
     # Comfort violation
     violation_celsius = max(0.0, comfort_min - current_temp) + max(0.0, current_temp - comfort_max)
-    is_feasible = violation_celsius <= 1e-9
+    is_feasible = violation_celsius <= COMFORT_FEASIBILITY_TOLERANCE_C
 
     return {
         "predicted_temp_at_start": current_temp,
@@ -1516,7 +1522,7 @@ EVENT_CONTROL_REPORT_METRIC_COLUMNS: list[str] = [
 
 
 def _validation_interval_hours(index: pd.DatetimeIndex) -> float:
-    if len(index) < 2:
+    if len(index) < MIN_INTERVAL_POINTS:
         return 0.25
     diffs = pd.Series(index.sort_values()).diff().dropna()
     if diffs.empty:
@@ -1684,10 +1690,7 @@ def _event_window_mask(comparison_df: pd.DataFrame, row: pd.Series) -> pd.Series
     end_value = row.get("window_ends_at", pd.NaT)
     if pd.isna(end_value):
         end_value = row.get("window_starts_at", pd.NaT)
-    if pd.isna(end_value):
-        end = start + pd.Timedelta(minutes=15)
-    else:
-        end = pd.Timestamp(end_value)
+    end = start + pd.Timedelta(minutes=15) if pd.isna(end_value) else pd.Timestamp(end_value)
     if end <= start:
         end = start + pd.Timedelta(minutes=15)
     mask = (comparison_df.index >= start) & (comparison_df.index < end)
@@ -1695,7 +1698,7 @@ def _event_window_mask(comparison_df: pd.DataFrame, row: pd.Series) -> pd.Series
 
 
 def _pct_savings(savings: float, baseline: float) -> float:
-    if abs(baseline) <= 1e-12:
+    if abs(baseline) <= BASELINE_SAVINGS_EPSILON:
         return 0.0
     return float(savings / baseline * 100.0)
 
@@ -1958,16 +1961,17 @@ def _schedule_rows_for_window(
         minutes=int(selected_candidate["candidate_start_offset_minutes"])
     )
 
+    device_on = {i: int(i in active_devices) for i in range(1, EXPECTED_SCHEDULE_DEVICES + 1)}
     rows: list[dict[str, Any]] = []
     for event_id in window.original_event_ids:
         row = ScheduleRow(
             event_id=str(event_id),
             mode=mode,
             start_time=start_time.to_pydatetime(),
-            device_1_on=int(1 in active_devices),
-            device_2_on=int(2 in active_devices),
-            device_3_on=int(3 in active_devices),
-            device_4_on=int(4 in active_devices),
+            device_1_on=device_on[1],
+            device_2_on=device_on[2],
+            device_3_on=device_on[3],
+            device_4_on=device_on[4],
             target_temp=float(target_temp),
             predicted_temp_at_start=float(selected_candidate["predicted_temp_at_start"]),
             expected_kwh=float(selected_candidate["expected_kwh"]),
@@ -2014,7 +2018,7 @@ def optimize_event_control_schedules(
         per original event and diagnostics_df contains compact ranked candidate views.
     """
     config.validate()
-    if expected_devices != 4:
+    if expected_devices != EXPECTED_SCHEDULE_DEVICES:
         raise ValueError("schedule formatting currently requires expected_devices=4.")
     if max_simultaneous_devices < 0 or max_simultaneous_devices > expected_devices:
         raise ValueError("max_simultaneous_devices must be between 0 and expected_devices.")

@@ -12,6 +12,7 @@ Severity levels: "critical", "warning", "info"
 """
 
 import pandas as pd
+
 from data.loader import devices, snapshots
 
 _MIN_PRESSURE_SAMPLES = 10

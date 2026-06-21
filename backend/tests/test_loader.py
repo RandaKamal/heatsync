@@ -1,6 +1,5 @@
 import pandas as pd
 import pytest
-
 from backend.data import loader
 
 DEVICE_COUNT = 4

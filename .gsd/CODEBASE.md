@@ -1,7 +1,7 @@
 # Codebase Map
 
-Generated: 2026-06-21T10:46:10Z | Files: 177 | Described: 0/177
-<!-- gsd:codebase-meta {"generatedAt":"2026-06-21T10:46:10Z","fingerprint":"4e13ddd287fef4d6125046235ee3153e30b7cab1","fileCount":177,"truncated":false} -->
+Generated: 2026-06-21T19:06:28Z | Files: 172 | Described: 0/172
+<!-- gsd:codebase-meta {"generatedAt":"2026-06-21T19:06:28Z","fingerprint":"95ae7d0801c8115a1173cf64350dcdcfc555aa2c","fileCount":172,"truncated":false} -->
 
 ### (root)/
 - `.gitignore`
@@ -12,6 +12,7 @@ Generated: 2026-06-21T10:46:10Z | Files: 177 | Described: 0/177
 - `GEMINI.md`
 - `README_FAILURE_SIMULATION.md`
 - `README.md`
+- `ruff_errors.txt`
 - `skills-lock.json`
 
 ### .github/
@@ -144,12 +145,6 @@ Generated: 2026-06-21T10:46:10Z | Files: 177 | Described: 0/177
 - `backend/notebooks/05_anomaly_detection.ipynb`
 - `backend/notebooks/06_energy_controls.ipynb`
 - `backend/notebooks/07_event_based_device_control.ipynb`
-- `backend/notebooks/create_notebook.py`
-- `backend/notebooks/executed_no_existing.ipynb`
-- `backend/notebooks/executed_notebook.ipynb`
-- `backend/notebooks/run_nb_debug.py`
-- `backend/notebooks/test_pipeline_clean.py`
-- `backend/notebooks/test_pipeline.py`
 - `backend/notebooks/utils.py`
 
 ### backend/optimization/
