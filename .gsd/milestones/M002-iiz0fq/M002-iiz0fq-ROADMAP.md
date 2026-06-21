@@ -25,7 +25,7 @@
 - [x] **S03: Baseline vs Smart-Control Comparison, Plots, and CSV Reports** `risk:low` `depends:[S01,S02]`
   > After this: Notebook produces heating and cooling validation plots showing: measured-baseline vs smart-control room temperature with comfort band, event shading with smart-control start times, measured vs simulated total power, per-device on/off schedules, cumulative energy baseline vs smart. Saves per-event and time-series CSV reports plus PNG figures under backend/artifacts/event_device_control/. Reports electricity (kWh), cost (EUR), CO₂ (kg), and comfort metrics (MAE, RMSE, comfort-hit rate, degree-minutes violation).
 
-- [ ] **S04: Test Harness and Backend Quality Gates** `risk:low` `depends:[S01,S02,S03]`
+- [x] **S04: Test Harness and Backend Quality Gates** `risk:low` `depends:[S01,S02,S03]`
   > After this: pytest test_notebooks.py (extended with 07_event_based_device_control.ipynb) passes; reload-path test passes; backend gates (ruff check, ruff format, mypy, bandit, py_compile, pre-commit) all pass. All notebook helpers in utils.py are typed and lint-clean.
 
 ## Boundary Map
