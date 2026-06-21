@@ -51,7 +51,7 @@ Notebook cells use existing utils.py loaders (load_processed or build_aligned_da
   - Files: `backend/notebooks/07_event_based_device_control.ipynb`, `backend/notebooks/utils.py`
   - Verify: Notebook cells print per-device power model parameters (active/standby power per mode). Predicted vs actual power comparison metrics shown.
 
-- [ ] **T04: Model artifact save and reload path** `est:1-2 hours`
+- [x] **T04: Implemented model artifact save and reload path with LOAD_EXISTING_MODEL flag and helper functions in utils.py.** `est:1-2 hours`
   1. Implement artifact save: after training, save `thermal_model.joblib`, `scaler.joblib`, `feature_columns.json`, `model_metadata.json` (containing season, train/val timestamps, coefficients, metrics, plausibility verdict) to `backend/artifacts/event_device_control/models/`.
   2. Also save device power model parameters (e.g., `device_power_model.joblib` or as part of metadata).
   3. Implement `LOAD_EXISTING_MODEL = True` flag at notebook top: when True and all required artifact files exist, load from disk without retraining. If any file is missing, retrain and re-save.

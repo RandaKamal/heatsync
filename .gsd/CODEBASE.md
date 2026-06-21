@@ -1,7 +1,7 @@
 # Codebase Map
 
-Generated: 2026-06-20T22:25:10Z | Files: 155 | Described: 0/155
-<!-- gsd:codebase-meta {"generatedAt":"2026-06-20T22:25:10Z","fingerprint":"e687ac9a8e9a8742a4279d77f49e627aac7bcb03","fileCount":155,"truncated":false} -->
+Generated: 2026-06-21T03:58:26Z | Files: 159 | Described: 0/159
+<!-- gsd:codebase-meta {"generatedAt":"2026-06-21T03:58:26Z","fingerprint":"1ce42ab99fba605ef9f82c79eb2f0381aa26f02d","fileCount":159,"truncated":false} -->
 
 ### (root)/
 - `.gitignore`
@@ -82,6 +82,12 @@ Generated: 2026-06-20T22:25:10Z | Files: 155 | Described: 0/155
 - `backend/api/__init__.py`
 - `backend/api/routes.py`
 - `backend/api/weather.py`
+
+### backend/artifacts/event_device_control/models/
+- `backend/artifacts/event_device_control/models/cooling_device_power_model.joblib`
+- `backend/artifacts/event_device_control/models/cooling_thermal_model.joblib`
+- `backend/artifacts/event_device_control/models/heating_device_power_model.joblib`
+- `backend/artifacts/event_device_control/models/heating_thermal_model.joblib`
 
 ### backend/comfort/
 - `backend/comfort/__init__.py`

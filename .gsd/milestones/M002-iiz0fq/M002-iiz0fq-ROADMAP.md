@@ -16,7 +16,7 @@
 
 ## Slices
 
-- [ ] **S01: Data Pipeline, Thermal Model, and Device Power Model** `risk:high` `depends:[]`
+- [x] **S01: Data Pipeline, Thermal Model, and Device Power Model** `risk:high` `depends:[]`
   > After this: Notebook cells 1–N execute on both heating and cooling seasons: config dicts visible, data loaded and merged to 15-min grid with device-level and room-level features, grey-box thermal model trained with physically plausible coefficients (or room-level fallback activated), device power model trained, all model artifacts saved to backend/artifacts/event_device_control/models/ and successfully reloaded with LOAD_EXISTING_MODEL=True. Printed: model coefficients, temperature MAE/RMSE, power prediction RMSE.
 
 - [ ] **S02: Event-Based Optimizer and Control Schedule** `risk:medium` `depends:[S01]`

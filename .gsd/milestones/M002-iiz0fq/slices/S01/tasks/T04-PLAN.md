@@ -4,7 +4,7 @@ estimated_files: 2
 skills_used: []
 ---
 
-# T04: Model artifact save and reload path
+# T04: Implemented model artifact save and reload path with LOAD_EXISTING_MODEL flag and helper functions in utils.py.
 
 1. Implement artifact save: after training, save `thermal_model.joblib`, `scaler.joblib`, `feature_columns.json`, `model_metadata.json` (containing season, train/val timestamps, coefficients, metrics, plausibility verdict) to `backend/artifacts/event_device_control/models/`.
 2. Also save device power model parameters (e.g., `device_power_model.joblib` or as part of metadata).
