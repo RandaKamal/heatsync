@@ -1,7 +1,7 @@
 # Codebase Map
 
-Generated: 2026-06-21T03:58:26Z | Files: 159 | Described: 0/159
-<!-- gsd:codebase-meta {"generatedAt":"2026-06-21T03:58:26Z","fingerprint":"1ce42ab99fba605ef9f82c79eb2f0381aa26f02d","fileCount":159,"truncated":false} -->
+Generated: 2026-06-21T06:14:01Z | Files: 172 | Described: 0/172
+<!-- gsd:codebase-meta {"generatedAt":"2026-06-21T06:14:01Z","fingerprint":"dc0503fecef62332ac93c81ea91f4e4fc950f0e2","fileCount":172,"truncated":false} -->
 
 ### (root)/
 - `.gitignore`
@@ -85,9 +85,20 @@ Generated: 2026-06-21T03:58:26Z | Files: 159 | Described: 0/159
 
 ### backend/artifacts/event_device_control/models/
 - `backend/artifacts/event_device_control/models/cooling_device_power_model.joblib`
+- `backend/artifacts/event_device_control/models/cooling_feature_columns.json`
+- `backend/artifacts/event_device_control/models/cooling_model_metadata.json`
+- `backend/artifacts/event_device_control/models/cooling_scaler.joblib`
 - `backend/artifacts/event_device_control/models/cooling_thermal_model.joblib`
+- `backend/artifacts/event_device_control/models/device_power_model.joblib`
+- `backend/artifacts/event_device_control/models/feature_columns.json`
 - `backend/artifacts/event_device_control/models/heating_device_power_model.joblib`
+- `backend/artifacts/event_device_control/models/heating_feature_columns.json`
+- `backend/artifacts/event_device_control/models/heating_model_metadata.json`
+- `backend/artifacts/event_device_control/models/heating_scaler.joblib`
 - `backend/artifacts/event_device_control/models/heating_thermal_model.joblib`
+- `backend/artifacts/event_device_control/models/model_metadata.json`
+- `backend/artifacts/event_device_control/models/scaler.joblib`
+- `backend/artifacts/event_device_control/models/thermal_model.joblib`
 
 ### backend/comfort/
 - `backend/comfort/__init__.py`
@@ -128,6 +139,8 @@ Generated: 2026-06-21T03:58:26Z | Files: 159 | Described: 0/159
 - `backend/notebooks/06_energy_controls.ipynb`
 - `backend/notebooks/07_event_based_device_control.ipynb`
 - `backend/notebooks/create_notebook.py`
+- `backend/notebooks/executed_no_existing.ipynb`
+- `backend/notebooks/executed_notebook.ipynb`
 - `backend/notebooks/run_nb_debug.py`
 - `backend/notebooks/test_pipeline_clean.py`
 - `backend/notebooks/test_pipeline.py`

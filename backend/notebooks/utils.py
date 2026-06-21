@@ -1073,6 +1073,10 @@ class ScheduleRow:
     is_feasible: bool = True
     violation_celsius: float = 0.0
     selection_reason: str = ""
+    feasible: bool = True
+    comfort_violation_c: float = 0.0
+    candidate_start_offset_minutes: int = 0
+    active_device_count: int = 0
 
 
 def validate_optimizer_inputs(
