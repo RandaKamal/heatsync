@@ -2,11 +2,10 @@ import pathlib
 from collections.abc import Callable
 from datetime import datetime
 
+import notebooks.utils as notebook_utils
 import numpy as np
 import pandas as pd
 import pytest
-
-import notebooks.utils as notebook_utils
 from notebooks.utils import (
     SCHEDULE_OUTPUT_COLUMNS,
     ConsolidatedEventWindow,

@@ -2,7 +2,6 @@ from typing import Any, cast
 
 import pandas as pd
 import pytest
-
 from notebooks.utils import (
     COMPARISON_TIMESERIES_COLUMNS,
     EVENT_CONTROL_REPORT_METRIC_COLUMNS,

@@ -6,18 +6,18 @@ import math
 from datetime import UTC, datetime
 from typing import Any, cast
 
-import pandas as pd
-from flask import Blueprint, Response, jsonify, request
-
 import comfort.model as comfort
 import impact.calculator as impact
+import pandas as pd
 from anomaly import detector
-from api.weather import DEFAULT_LAT, DEFAULT_LON, fetch_current, fetch_forecast
 from control import controller
 from data import loader
+from flask import Blueprint, Response, jsonify, request
 from optimization import optimizer
 from prediction import predictor
 from schedule import manager as schedule_manager
+
+from api.weather import DEFAULT_LAT, DEFAULT_LON, fetch_current, fetch_forecast
 
 api_bp = Blueprint("api", __name__, url_prefix="/api")
 

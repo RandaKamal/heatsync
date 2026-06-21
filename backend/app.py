@@ -1,7 +1,6 @@
+from api.routes import api_bp
 from flask import Flask, Response, jsonify
 from flask_cors import CORS
-
-from api.routes import api_bp
 
 
 def create_app() -> Flask:

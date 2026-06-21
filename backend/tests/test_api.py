@@ -1,6 +1,6 @@
-from backend.data import loader
-
 from app import create_app
+
+from backend.data import loader
 
 HTTP_OK = 200
 DEVICE_COUNT = 4

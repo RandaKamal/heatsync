@@ -1,11 +1,10 @@
 import numpy as np
 import torch
+from notebooks.utils import load_processed
 from sklearn.ensemble import IsolationForest
 from sklearn.preprocessing import StandardScaler
 from sklearn.svm import OneClassSVM
 from torch import nn, optim
-
-from notebooks.utils import load_processed
 
 DETECTOR_COUNT = 3
 
