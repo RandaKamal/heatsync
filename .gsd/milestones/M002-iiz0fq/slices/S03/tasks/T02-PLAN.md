@@ -4,7 +4,7 @@ estimated_files: 7
 skills_used: []
 ---
 
-# T02: Notebook Reports Figures and Executive Recap
+# T02: Extended the event-based control notebook with comparison reporting, generated season validation figures and timeseries CSVs, and added a comprehensive executive recap section.
 
 ---
 skills_used:

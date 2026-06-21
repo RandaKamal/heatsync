@@ -42,7 +42,7 @@ S03 consumes S01 thermal/device-power model artifacts, S02 schedule outputs, and
   - Files: `backend/notebooks/utils.py`, `backend/tests/test_event_control_reporting.py`
   - Verify: PYTHONPATH=. uv run --project backend pytest backend/tests/test_event_control_reporting.py
 
-- [ ] **T02: Notebook Reports Figures and Executive Recap** `est:1 day`
+- [x] **T02: Extended the event-based control notebook with comparison reporting, generated season validation figures and timeseries CSVs, and added a comprehensive executive recap section.** `est:1 day`
   ---
   skills_used:
     - write-docs
@@ -52,7 +52,7 @@ S03 consumes S01 thermal/device-power model artifacts, S02 schedule outputs, and
   - Files: `backend/notebooks/07_event_based_device_control.ipynb`, `backend/artifacts/event_device_control/reports/heating_event_control_results.csv`, `backend/artifacts/event_device_control/reports/cooling_event_control_results.csv`, `backend/artifacts/event_device_control/reports/heating_validation_timeseries.csv`, `backend/artifacts/event_device_control/reports/cooling_validation_timeseries.csv`, `backend/artifacts/event_device_control/figures/heating_validation_plot.png`, `backend/artifacts/event_device_control/figures/cooling_validation_plot.png`
   - Verify: PYTHONPATH=. uv run --project backend pytest backend/tests/test_notebooks.py -k 07_event_based_device_control.ipynb
 
-- [ ] **T03: Slice-Level Artifact Contract Verification** `est:0.25 day`
+- [x] **T03: Verified slice-level reporting contracts and successfully executed the event-control notebooks to regenerate validation artifacts.** `est:0.25 day`
   ---
   skills_used:
     - verify-before-complete
