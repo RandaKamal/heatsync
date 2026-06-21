@@ -1459,6 +1459,287 @@ SCHEDULE_OUTPUT_COLUMNS: list[str] = [
 EVENT_CONTROL_REPORT_DIR = PROJECT_ROOT / "backend" / "artifacts" / "event_device_control" / "reports"
 
 
+COMPARISON_TIMESERIES_COLUMNS: list[str] = [
+    "event_id",
+    "timestamp",
+    "baseline_power_kw",
+    "smart_power_kw",
+    "baseline_kwh",
+    "smart_kwh",
+    "baseline_cost_eur",
+    "smart_cost_eur",
+    "baseline_co2_kg",
+    "smart_co2_kg",
+    "cumulative_baseline_kwh",
+    "cumulative_smart_kwh",
+    "cumulative_baseline_cost_eur",
+    "cumulative_smart_cost_eur",
+    "cumulative_baseline_co2_kg",
+    "cumulative_smart_co2_kg",
+    "room_temp",
+    "comfort_min",
+    "comfort_max",
+    "inside_comfort_band",
+    "degree_minutes_violation",
+    "smart_control_active",
+]
+
+EVENT_CONTROL_REPORT_METRIC_COLUMNS: list[str] = [
+    "baseline_kwh",
+    "smart_kwh",
+    "energy_savings_kwh",
+    "energy_savings_pct",
+    "baseline_cost_eur",
+    "smart_cost_eur",
+    "cost_savings_eur",
+    "cost_savings_pct",
+    "baseline_co2_kg",
+    "smart_co2_kg",
+    "co2_savings_kg",
+    "co2_savings_pct",
+    "temperature_mae_c",
+    "temperature_rmse_c",
+    "comfort_hit_rate",
+    "degree_minutes_violation",
+    "report_status",
+    "report_reason",
+]
+
+
+def _validation_interval_hours(index: pd.DatetimeIndex) -> float:
+    if len(index) < 2:
+        return 0.25
+    diffs = pd.Series(index.sort_values()).diff().dropna()
+    if diffs.empty:
+        return 0.25
+    return float(diffs.mode().iloc[0] / pd.Timedelta(hours=1))
+
+
+def _baseline_power_column(validation_df: pd.DataFrame) -> str:
+    for col in ["room_power_kw", "baseline_power_kw", "power_draw_kw"]:
+        if col in validation_df.columns:
+            return col
+    raise ValueError("validation_df must contain a baseline power column such as room_power_kw or power_draw_kw.")
+
+
+def _require_schedule_columns(schedule_df: pd.DataFrame, required: list[str]) -> None:
+    missing = [col for col in required if col not in schedule_df.columns]
+    if missing:
+        raise ValueError(f"schedule_df missing required columns: {missing}")
+
+
+def classify_event_control_status(
+    *,
+    feasible: bool,
+    comfort_violation_c: float,
+    cost_savings_eur: float,
+    neutral_tolerance_eur: float = 1e-9,
+) -> tuple[str, str]:
+    """Classify a per-event report row without filtering away edge cases."""
+    if not feasible:
+        return "infeasible", "selected schedule was marked infeasible by the optimizer"
+    if comfort_violation_c > 0.0:
+        return "comfort_missed", f"comfort violation remained at {comfort_violation_c:.3f} C"
+    if cost_savings_eur < -neutral_tolerance_eur:
+        return "negative_savings", f"smart control increased cost by {abs(cost_savings_eur):.3f} EUR"
+    if abs(cost_savings_eur) <= neutral_tolerance_eur:
+        return "neutral_savings", "smart-control cost savings are near zero"
+    return "savings", f"smart control saved {cost_savings_eur:.3f} EUR"
+
+
+def _expanded_smart_controls(
+    validation_index: pd.DatetimeIndex,
+    schedule_df: pd.DataFrame,
+    expected_devices: int,
+) -> pd.DataFrame:
+    controls = pd.DataFrame(0.0, index=validation_index, columns=[f"device_{i}_active" for i in range(1, expected_devices + 1)])
+    controls["event_id"] = ""
+    controls["smart_control_active"] = 0.0
+
+    for _, row in schedule_df.iterrows():
+        start = pd.Timestamp(row["start_time"])
+        end_value = row.get("window_starts_at", pd.NaT)
+        if pd.isna(end_value):
+            end_value = row.get("window_ends_at", start + pd.Timedelta(minutes=15))
+        end = pd.Timestamp(end_value)
+        mask = (controls.index >= start) & (controls.index < end)
+        if not mask.any():
+            continue
+        event_id = str(row.get("event_id", ""))
+        for i in range(1, expected_devices + 1):
+            schedule_col = f"device_{i}_on"
+            active_col = f"device_{i}_active"
+            controls.loc[mask, active_col] = float(row.get(schedule_col, 0.0))
+        existing = controls.loc[mask, "event_id"].astype(str)
+        controls.loc[mask, "event_id"] = np.where(existing == "", event_id, existing + ";" + event_id)
+        controls.loc[mask, "smart_control_active"] = 1.0
+    return controls
+
+
+def build_event_control_comparison_timeseries(
+    validation_df: pd.DataFrame,
+    schedule_df: pd.DataFrame,
+    device_power_model_dict: dict[str, Any],
+    *,
+    electricity_price: float = 0.15,
+    co2_factor: float = 0.4,
+    comfort_min: float | None = None,
+    comfort_max: float | None = None,
+    expected_devices: int | None = None,
+) -> pd.DataFrame:
+    """
+    Expand selected schedules into a 15-minute leakage-safe baseline-vs-smart series.
+
+    Baseline power comes from measured validation power columns. Smart power is simulated
+    only from schedule flags plus the learned device power model via predict_device_power().
+    """
+    if not isinstance(validation_df.index, pd.DatetimeIndex):
+        raise ValueError("validation_df must be indexed by a DatetimeIndex.")
+    _require_schedule_columns(schedule_df, ["event_id", "start_time"])
+    baseline_col = _baseline_power_column(validation_df)
+    expected_devices = int(expected_devices or device_power_model_dict.get("expected_devices", 4))
+    device_cols = [f"device_{i}_on" for i in range(1, expected_devices + 1)]
+    _require_schedule_columns(schedule_df, device_cols)
+
+    comparison = pd.DataFrame(index=validation_df.index.copy())
+    comparison["event_id"] = ""
+    comparison["timestamp"] = comparison.index
+    comparison["baseline_power_kw"] = validation_df[baseline_col].astype(float).fillna(0.0)
+
+    controls = _expanded_smart_controls(comparison.index, schedule_df, expected_devices)
+    smart_inputs = controls[[f"device_{i}_active" for i in range(1, expected_devices + 1)]]
+    smart_predictions = predict_device_power(device_power_model_dict, smart_inputs)
+    smart_power_cols = [f"device_{i}_predicted_power_kw" for i in range(1, expected_devices + 1)]
+    comparison["smart_power_kw"] = smart_predictions[smart_power_cols].sum(axis=1).astype(float)
+
+    interval_hours = _validation_interval_hours(comparison.index)
+    comparison["baseline_kwh"] = comparison["baseline_power_kw"] * interval_hours
+    comparison["smart_kwh"] = comparison["smart_power_kw"] * interval_hours
+    comparison["baseline_cost_eur"] = comparison["baseline_kwh"] * float(electricity_price)
+    comparison["smart_cost_eur"] = comparison["smart_kwh"] * float(electricity_price)
+    comparison["baseline_co2_kg"] = comparison["baseline_kwh"] * float(co2_factor)
+    comparison["smart_co2_kg"] = comparison["smart_kwh"] * float(co2_factor)
+    comparison["cumulative_baseline_kwh"] = comparison["baseline_kwh"].cumsum()
+    comparison["cumulative_smart_kwh"] = comparison["smart_kwh"].cumsum()
+    comparison["cumulative_baseline_cost_eur"] = comparison["baseline_cost_eur"].cumsum()
+    comparison["cumulative_smart_cost_eur"] = comparison["smart_cost_eur"].cumsum()
+    comparison["cumulative_baseline_co2_kg"] = comparison["baseline_co2_kg"].cumsum()
+    comparison["cumulative_smart_co2_kg"] = comparison["smart_co2_kg"].cumsum()
+
+    comparison["room_temp"] = validation_df["room_temp"].astype(float) if "room_temp" in validation_df.columns else np.nan
+    comparison["comfort_min"] = np.nan if comfort_min is None else float(comfort_min)
+    comparison["comfort_max"] = np.nan if comfort_max is None else float(comfort_max)
+    if comfort_min is None or comfort_max is None:
+        comparison["inside_comfort_band"] = np.nan
+        comparison["degree_minutes_violation"] = np.nan
+    else:
+        below = (float(comfort_min) - comparison["room_temp"]).clip(lower=0.0)
+        above = (comparison["room_temp"] - float(comfort_max)).clip(lower=0.0)
+        comparison["inside_comfort_band"] = ((below == 0.0) & (above == 0.0)).astype(float)
+        comparison["degree_minutes_violation"] = (below + above) * interval_hours * 60.0
+    comparison["smart_control_active"] = controls["smart_control_active"]
+    comparison["event_id"] = controls["event_id"]
+    for i in range(1, expected_devices + 1):
+        comparison[f"smart_device_{i}_active"] = controls[f"device_{i}_active"]
+        comparison[f"smart_device_{i}_power_kw"] = smart_predictions[f"device_{i}_predicted_power_kw"]
+
+    ordered = COMPARISON_TIMESERIES_COLUMNS + [col for col in comparison.columns if col not in COMPARISON_TIMESERIES_COLUMNS]
+    return comparison[ordered]
+
+
+def _event_window_mask(comparison_df: pd.DataFrame, row: pd.Series) -> pd.Series:
+    if not isinstance(comparison_df.index, pd.DatetimeIndex):
+        raise ValueError("comparison_df must be indexed by a DatetimeIndex.")
+    start = pd.Timestamp(row.get("start_time"))
+    end_value = row.get("window_ends_at", pd.NaT)
+    if pd.isna(end_value):
+        end_value = row.get("window_starts_at", pd.NaT)
+    if pd.isna(end_value):
+        end = start + pd.Timedelta(minutes=15)
+    else:
+        end = pd.Timestamp(end_value)
+    if end <= start:
+        end = start + pd.Timedelta(minutes=15)
+    return (comparison_df.index >= start) & (comparison_df.index < end)
+
+
+def _pct_savings(savings: float, baseline: float) -> float:
+    if abs(baseline) <= 1e-12:
+        return 0.0
+    return float(savings / baseline * 100.0)
+
+
+def augment_event_control_report(
+    schedule_df: pd.DataFrame,
+    comparison_df: pd.DataFrame,
+    *,
+    comfort_min: float | None = None,
+    comfort_max: float | None = None,
+) -> pd.DataFrame:
+    """Preserve schedule rows and append event/window comparison and status metrics."""
+    _require_schedule_columns(schedule_df, ["event_id", "start_time", "feasible", "comfort_violation_c"])
+    metric_rows: list[dict[str, Any]] = []
+    for _, row in schedule_df.iterrows():
+        event_slice = comparison_df.loc[_event_window_mask(comparison_df, row)]
+        baseline_kwh = float(event_slice["baseline_kwh"].sum()) if "baseline_kwh" in event_slice else 0.0
+        smart_kwh = float(event_slice["smart_kwh"].sum()) if "smart_kwh" in event_slice else 0.0
+        baseline_cost = float(event_slice["baseline_cost_eur"].sum()) if "baseline_cost_eur" in event_slice else 0.0
+        smart_cost = float(event_slice["smart_cost_eur"].sum()) if "smart_cost_eur" in event_slice else 0.0
+        baseline_co2 = float(event_slice["baseline_co2_kg"].sum()) if "baseline_co2_kg" in event_slice else 0.0
+        smart_co2 = float(event_slice["smart_co2_kg"].sum()) if "smart_co2_kg" in event_slice else 0.0
+        energy_savings = baseline_kwh - smart_kwh
+        cost_savings = baseline_cost - smart_cost
+        co2_savings = baseline_co2 - smart_co2
+
+        temps = event_slice["room_temp"].dropna() if "room_temp" in event_slice else pd.Series(dtype="float64")
+        target = float(row.get("target_temp", np.nan))
+        if temps.empty or pd.isna(target):
+            mae = float("nan")
+            rmse = float("nan")
+        else:
+            errors = temps.astype(float) - target
+            mae = float(errors.abs().mean())
+            rmse = float(np.sqrt((errors ** 2).mean()))
+
+        if "inside_comfort_band" in event_slice and event_slice["inside_comfort_band"].notna().any():
+            comfort_hit_rate = float(event_slice["inside_comfort_band"].mean())
+        elif comfort_min is not None and comfort_max is not None and not temps.empty:
+            comfort_hit_rate = float(((temps >= comfort_min) & (temps <= comfort_max)).mean())
+        else:
+            comfort_hit_rate = float("nan")
+        degree_minutes = float(event_slice["degree_minutes_violation"].sum()) if "degree_minutes_violation" in event_slice else float("nan")
+        feasible = bool(row.get("feasible", True))
+        comfort_violation = float(row.get("comfort_violation_c", 0.0))
+        status, reason = classify_event_control_status(
+            feasible=feasible,
+            comfort_violation_c=comfort_violation,
+            cost_savings_eur=cost_savings,
+        )
+        metric_rows.append({
+            "baseline_kwh": baseline_kwh,
+            "smart_kwh": smart_kwh,
+            "energy_savings_kwh": energy_savings,
+            "energy_savings_pct": _pct_savings(energy_savings, baseline_kwh),
+            "baseline_cost_eur": baseline_cost,
+            "smart_cost_eur": smart_cost,
+            "cost_savings_eur": cost_savings,
+            "cost_savings_pct": _pct_savings(cost_savings, baseline_cost),
+            "baseline_co2_kg": baseline_co2,
+            "smart_co2_kg": smart_co2,
+            "co2_savings_kg": co2_savings,
+            "co2_savings_pct": _pct_savings(co2_savings, baseline_co2),
+            "temperature_mae_c": mae,
+            "temperature_rmse_c": rmse,
+            "comfort_hit_rate": comfort_hit_rate,
+            "degree_minutes_violation": degree_minutes,
+            "report_status": status,
+            "report_reason": reason,
+        })
+    metrics_df = pd.DataFrame(metric_rows, index=schedule_df.index)
+    report_df = pd.concat([schedule_df.reset_index(drop=True), metrics_df.reset_index(drop=True)], axis=1)
+    return report_df[[*schedule_df.columns, *EVENT_CONTROL_REPORT_METRIC_COLUMNS]]
+
+
 CANDIDATE_DIAGNOSTIC_COLUMNS: list[str] = [
     "window_id",
     "candidate_rank",
