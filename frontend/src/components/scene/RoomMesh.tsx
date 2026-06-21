@@ -49,7 +49,13 @@ export function RoomMesh({ room, onSelect }: RoomMeshProps) {
             <strong>{room.name}</strong>
             <span className="status-dot" style={{ background: statusColor }} />
           </div>
-          <div className="room-label__status">{room.id}</div>
+          <div className="room-label__temperature">
+            {room.currentTemperature.toFixed(1)}°
+            <span> / {room.targetTemperature.toFixed(0)}°</span>
+          </div>
+          <div className="room-label__status">
+            {room.id} · {room.floor === 0 ? 'Ground' : 'Floor 1'} · {room.occupancy} ppl
+          </div>
         </div>
       </Html>
     </group>
