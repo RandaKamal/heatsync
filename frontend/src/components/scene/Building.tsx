@@ -4,10 +4,12 @@ import { STATUS_COLORS } from '../../utils/status'
 import { ClimateDevice as ClimateDeviceMesh } from './ClimateDevice'
 import { RoomMesh } from './RoomMesh'
 
-const W = 24
-const D = 16
-const H = 3.5
-const T = 0.18
+// Building constants
+const W  = 24     // total width  (m)
+const D  = 16     // total depth  (m)
+const H  = 3.5    // floor height (m)
+const TH = H * 2  // total height (m) = 7.0
+const T  = 0.18   // slab thickness
 
 interface BuildingProps {
   rooms: Room[]
@@ -17,72 +19,156 @@ interface BuildingProps {
   onSelectRoom: (id: string) => void
 }
 
-function FloorSlab() {
+// ── Structural elements ───────────────────────────────────────────────────────
+
+function Slab({ y, color = '#172536' }: { y: number; color?: string }) {
   return (
-    <mesh position={[0, 0, 0]} receiveShadow castShadow>
+    <mesh position={[0, y, 0]} receiveShadow castShadow>
       <boxGeometry args={[W + T, T, D + T]} />
-      <meshStandardMaterial color="#172536" roughness={0.82} metalness={0.06} />
+      <meshStandardMaterial color={color} roughness={0.82} metalness={0.06} />
     </mesh>
   )
 }
 
 function Roof() {
   return (
-    <mesh position={[0, H + T / 2, 0]} receiveShadow>
+    <mesh position={[0, TH + T / 2, 0]} receiveShadow>
       <boxGeometry args={[W + T, T, D + T]} />
       <meshStandardMaterial color="#1a2d40" roughness={0.78} metalness={0.1} />
     </mesh>
   )
 }
 
+// Transparent outer glass walls + opaque center divider
 function Walls() {
-  const mat = (
+  const yMid = TH / 2
+  const glassMat = (
     <meshStandardMaterial
       color="#1e3a52"
       transparent
-      opacity={0.22}
-      roughness={0.15}
-      metalness={0.4}
+      opacity={0.20}
+      roughness={0.12}
+      metalness={0.45}
       depthWrite={false}
     />
   )
-  const yMid = H / 2
+  const backMat = (
+    <meshStandardMaterial
+      color="#1e3a52"
+      transparent
+      opacity={0.09}
+      roughness={0.12}
+      metalness={0.45}
+      depthWrite={false}
+    />
+  )
+  const dividerMat = (
+    <meshStandardMaterial
+      color="#223a50"
+      transparent
+      opacity={0.30}
+      roughness={0.30}
+      metalness={0.25}
+      depthWrite={false}
+    />
+  )
+
   return (
     <group>
-      <mesh position={[0, yMid, -D / 2]}><boxGeometry args={[W, H, T]} />{mat}</mesh>
-      <mesh position={[-W / 2, yMid, 0]}><boxGeometry args={[T, H, D]} />{mat}</mesh>
-      <mesh position={[W / 2, yMid, 0]}><boxGeometry args={[T, H, D]} />{mat}</mesh>
-      <mesh position={[0, yMid, D / 2]}>
-        <boxGeometry args={[W, H, T]} />
-        <meshStandardMaterial color="#1e3a52" transparent opacity={0.10} roughness={0.15} metalness={0.4} depthWrite={false} />
-      </mesh>
+      {/* Outer front */}
+      <mesh position={[0, yMid, -D / 2]}><boxGeometry args={[W, TH, T]} />{glassMat}</mesh>
+      {/* Outer back (more transparent so view isn't blocked) */}
+      <mesh position={[0, yMid,  D / 2]}><boxGeometry args={[W, TH, T]} />{backMat}</mesh>
+      {/* Outer left */}
+      <mesh position={[-W / 2, yMid, 0]}><boxGeometry args={[T, TH, D]} />{glassMat}</mesh>
+      {/* Outer right */}
+      <mesh position={[ W / 2, yMid, 0]}><boxGeometry args={[T, TH, D]} />{glassMat}</mesh>
+      {/* Center vertical divider (separates left/right rooms, full height) */}
+      <mesh position={[0, yMid, 0]}><boxGeometry args={[T * 2, TH, D]} />{dividerMat}</mesh>
     </group>
   )
 }
+
+// Structural columns at the 4 building corners + 2 centre front/back
+function Columns() {
+  const positions: [number, number, number][] = [
+    [-W / 2 + 0.1,  TH / 2, -D / 2 + 0.1],
+    [ W / 2 - 0.1,  TH / 2, -D / 2 + 0.1],
+    [-W / 2 + 0.1,  TH / 2,  D / 2 - 0.1],
+    [ W / 2 - 0.1,  TH / 2,  D / 2 - 0.1],
+    [0,             TH / 2, -D / 2 + 0.1],  // centre front
+    [0,             TH / 2,  D / 2 - 0.1],  // centre back
+  ]
+  return (
+    <group>
+      {positions.map(([x, y, z]) => (
+        <mesh key={`col-${x}-${z}`} position={[x, y, z]} castShadow>
+          <boxGeometry args={[0.22, TH, 0.22]} />
+          <meshStandardMaterial color="#2e4a62" metalness={0.42} roughness={0.50} />
+        </mesh>
+      ))}
+    </group>
+  )
+}
+
+// Floor badge (HTML label on the front face of each floor)
+// (Rendered via RoomMesh labels — no extra badge needed here)
+
+// ── Duct lines ────────────────────────────────────────────────────────────────
+//
+//  Each heat pump duct runs:
+//    1. From the HP bottom down to roof level
+//    2. Diagonally to its room's ceiling centre
+//
+//  Room ceiling centres:
+//    Floor 0 (G01/G02): y = H = 3.5
+//    Floor 1 (F01/F02): y = TH = 7.0
+//    Left rooms  (G01/F01): x = -6
+//    Right rooms (G02/F02): x = +6
+
+function roomCeilingCentre(room: Room): [number, number, number] {
+  const cx = room.position[0]
+  const cy = room.floor === 0 ? H : TH
+  return [cx, cy, 0]
+}
+
+// ── Building component ────────────────────────────────────────────────────────
 
 export function Building({ rooms, devices, activeFloor, onSelectDevice, onSelectRoom }: BuildingProps) {
   const visibleRooms = rooms.filter(
     (r) => activeFloor === 'all' || r.floor === activeFloor,
   )
 
-  const ceilingCentre: [number, number, number] = [0, H, 0]
+  // Build duct lines: HP → roof level → room ceiling centre
+  const ductLines = devices.flatMap((device) => {
+    const servedRoom = rooms.find((r) => device.servedRoomIds.includes(r.id))
+    if (!servedRoom) return []
 
-  const ductLines = devices.map((device) => ({
-    key: device.id,
-    color: STATUS_COLORS[device.status],
-    points: [
-      [device.position[0], device.position[1] - 0.53, device.position[2]] as [number, number, number],
-      [device.position[0], H + T, device.position[2]] as [number, number, number],
-      ceilingCentre,
-    ] as [[number, number, number], [number, number, number], [number, number, number]],
-  }))
+    const [hx, hy, hz] = device.position
+    const [cx, cy, cz] = roomCeilingCentre(servedRoom)
+    const roofY = TH + T
+
+    return [{
+      key: device.id,
+      color: STATUS_COLORS[device.status],
+      points: [
+        [hx, hy - 0.53, hz] as [number, number, number],  // HP bottom
+        [hx, roofY,     hz] as [number, number, number],  // roof surface
+        [cx, cy + 0.05, cz] as [number, number, number],  // room ceiling
+      ] as [[number,number,number],[number,number,number],[number,number,number]],
+    }]
+  })
 
   return (
     <group>
-      <FloorSlab />
-      <Walls />
+      {/* Structural shell */}
+      <Slab y={0} />                          {/* ground floor */}
+      <Slab y={H} color="#1c2f42" />          {/* inter-floor slab */}
       <Roof />
+      <Walls />
+      <Columns />
 
+      {/* Duct lines */}
       {ductLines.map((duct) => (
         <Line
           key={duct.key}
@@ -90,17 +176,19 @@ export function Building({ rooms, devices, activeFloor, onSelectDevice, onSelect
           color={duct.color}
           lineWidth={1.5}
           transparent
-          opacity={0.35}
+          opacity={0.38}
           dashed
-          dashSize={0.5}
-          gapSize={0.3}
+          dashSize={0.45}
+          gapSize={0.28}
         />
       ))}
 
+      {/* Rooms (filtered by floor) */}
       {visibleRooms.map((room) => (
         <RoomMesh key={room.id} room={room} onSelect={onSelectRoom} />
       ))}
 
+      {/* Heat pumps (always shown — they're on the roof above the building) */}
       {devices.map((device) => (
         <ClimateDeviceMesh key={device.id} device={device} onSelect={onSelectDevice} />
       ))}
