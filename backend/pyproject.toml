@@ -70,6 +70,10 @@ ignore = [
     "PLR0913",
 ]
 
+[tool.ruff.lint.per-file-ignores]
+# Tests assert against literal expected values; magic-value checks add noise here.
+"**/tests/**" = ["PLR2004"]
+
 [tool.ruff.format]
 indent-style = "space"
 line-ending = "lf"

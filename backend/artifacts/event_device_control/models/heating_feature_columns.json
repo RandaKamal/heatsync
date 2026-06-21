@@ -1,0 +1,6 @@
+[
+  "room_temp",
+  "outside_temperature",
+  "room_power_kw",
+  "event_active"
+]

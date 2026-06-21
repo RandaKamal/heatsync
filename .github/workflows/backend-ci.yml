@@ -92,4 +92,4 @@ jobs:
             exit 0
           fi
 
-          uv run --project backend pytest "${test_files[@]}" -q
+          PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 uv run --project backend pytest -c backend/pyproject.toml "${test_files[@]}" -q

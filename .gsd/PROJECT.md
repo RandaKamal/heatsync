@@ -11,11 +11,7 @@ Demonstrate and validate temperature forecasting, anomaly detection, and occupan
 ## Project Shape
 
 - **Complexity:** complex
-- **Why:** The project requires a mix of statistical modeling (SARIMAX), machine learning (LSTM), physical model fitting (2R2C Grey-box via scipy optimize), PyTorch deep learning (Autoencoders, PINNs), and multi-timeseries alignment.
-
-## Current State
-
-Raw Heat Pump snapshot files and power draw CSV data are available under `backend/data/` for heating and cooling periods.
+- **Why:** The project requires a mix of statistical modeling (SARIMAX), machine learning (LSTM), physical model fitting (2R2C Grey-box via scipy.optimize), PINNs (Physics-Informed Neural Networks), multi-model anomaly detection, occupancy energy estimation, and event-based/device-level smart control optimization under multi-layered physical and thermodynamic constraints.
 
 ## Architecture / Key Patterns
 
@@ -29,3 +25,5 @@ See `.gsd/REQUIREMENTS.md` for the explicit capability contract, requirement sta
 
 ## Milestone Sequence
 
+- [x] M001: M001: M001: M001: HeatSync Modeling and Controls Notebooks — Create a comprehensive set of Jupyter notebooks under backend/notebooks/ with a shared helper module backend/notebooks/utils.py illustrating data preprocessing, forecasting, grey-box/PINN modeling, anomaly detection, and energy controls on actual Heat Pump data.
+- [ ] M002-iiz0fq: New milestone M002-iiz0fq — Planned.

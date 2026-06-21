@@ -30,5 +30,5 @@ uv run --project backend python -m py_compile $(git ls-files 'backend/*.py' 'bac
 When tests exist under `backend/`, run:
 
 ```bash
-uv run --project backend pytest $(git ls-files 'backend/test_*.py' 'backend/*_test.py' 'backend/**/test_*.py' 'backend/**/*_test.py') -q
+PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 uv run --project backend pytest -c backend/pyproject.toml $(git ls-files 'backend/test_*.py' 'backend/*_test.py' 'backend/**/test_*.py' 'backend/**/*_test.py') -q
 ```

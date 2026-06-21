@@ -2,12 +2,20 @@
 Shared utilities for data preprocessing, clock alignment, and feature engineering.
 """
 
+import itertools
+import json
 import logging
 import pathlib
 import warnings
-from typing import Any
+from dataclasses import asdict, dataclass, field
+from datetime import datetime
+from typing import Any, cast
 
+import joblib
+import numpy as np
 import pandas as pd
+from sklearn.linear_model import Ridge
+from sklearn.preprocessing import StandardScaler
 
 logger = logging.getLogger(__name__)
 
@@ -89,6 +97,14 @@ SPACE_EVENTS_OPTIONAL: list[str] = ["name", "type", "source"]
 MAX_INTERPOLATION_GAP = 2
 WEEKEND_START_DAY = 5
 THRESHOLD_REQUIRED = 0.5
+SECONDS_PER_HOUR = 3_600.0
+# Schedule formatting currently assumes a fixed four-device layout.
+EXPECTED_SCHEDULE_DEVICES = 4
+# Minimum number of timestamps needed to infer a sampling interval.
+MIN_INTERVAL_POINTS = 2
+# Numerical tolerances (non-behavioural; named to avoid inline magic values).
+COMFORT_FEASIBILITY_TOLERANCE_C = 1e-9
+BASELINE_SAVINGS_EPSILON = 1e-12
 
 
 def validate_columns(df: pd.DataFrame, file_type: str, file_path: str) -> None:
@@ -406,3 +422,1693 @@ def load_processed(window: str, output_dir: str = "backend/data/processed") -> p
     df["timestamp"] = pd.to_datetime(df["timestamp"])
     df.set_index("timestamp", inplace=True)
     return df
+
+
+def build_room_physical_model_frame(
+    df: pd.DataFrame,
+    *,
+    dt_seconds: float = 900.0,
+    cop: float = 1.0,
+) -> pd.DataFrame:
+    """
+    Aggregate per-device processed rows into one room-level physical-model frame.
+
+    The thermal state is room-level, while processed rows are per device. This helper
+    keeps observed temperature and outdoor telemetry as device means, sums electrical
+    power across all devices, and derives interval/cumulative electricity use.
+    """
+    if dt_seconds <= 0.0:
+        raise ValueError("dt_seconds must be positive.")
+    if cop <= 0.0:
+        raise ValueError("cop must be positive.")
+
+    required_cols = [
+        "device_id",
+        "status_temperature_in_celsius",
+        "outside_temperature",
+        "power_draw_kw",
+    ]
+    missing_cols = [col for col in required_cols if col not in df.columns]
+    if missing_cols:
+        raise ValueError(f"Processed physical model data is missing columns: {missing_cols}")
+    if not isinstance(df.index, pd.DatetimeIndex):
+        raise ValueError("Processed physical model data must be indexed by timestamp.")
+
+    grouped = df.sort_index().groupby(level=0, sort=True)
+    room_df = pd.DataFrame(index=grouped.size().index)
+    room_df.index.name = df.index.name or "timestamp"
+
+    room_df["T_in"] = grouped["status_temperature_in_celsius"].mean()
+    room_df["T_out"] = grouped["outside_temperature"].mean()
+    room_df["Q_electric_kw"] = grouped["power_draw_kw"].sum()
+    room_df["device_count"] = grouped["device_id"].nunique()
+
+    optional_aggregations = {
+        "target_temp": "mean",
+        "occupancy_flag": "max",
+        "is_heating_required": "max",
+        "is_cooling_required": "max",
+        "status_is_compressor_active": "max",
+        "status_is_defrost_active": "max",
+        "hour_of_day": "first",
+        "day_of_week": "first",
+        "is_weekend": "first",
+    }
+    for col, agg in optional_aggregations.items():
+        if col in df.columns:
+            if agg == "mean":
+                room_df[col] = grouped[col].mean()
+            elif agg == "max":
+                room_df[col] = grouped[col].max()
+            else:
+                room_df[col] = grouped[col].first()
+
+    dt_hours = dt_seconds / SECONDS_PER_HOUR
+    room_df["Q_heat_kw"] = room_df["Q_electric_kw"] * cop
+    room_df["electricity_kwh"] = room_df["Q_electric_kw"] * dt_hours
+    room_df["cumulative_electricity_kwh"] = room_df["electricity_kwh"].cumsum()
+
+    return room_df.dropna(subset=["T_in", "T_out", "Q_electric_kw", "Q_heat_kw"])
+
+
+KNOWN_DEVICE_ORDER = [
+    "bdaf0e14-2cd1-43c8-b9ea-b3c90309f773",
+    "1c893f75-4599-4402-9d4c-1017aa858fa8",
+    "e72fea56-abe7-4d3f-a0ed-1e6b6c462157",
+    "930f3621-05df-4574-9270-9d994c5b716c",
+]
+
+
+FIFTEEN_MINUTE_HOURS = 0.25
+EVENT_FEATURE_INTERVAL = pd.Timedelta(minutes=15)
+
+
+def _require_datetime_index(df: pd.DataFrame, frame_name: str) -> None:
+    if not isinstance(df.index, pd.DatetimeIndex):
+        raise ValueError(f"{frame_name} must be indexed by timestamp.")
+
+
+def _require_columns(df: pd.DataFrame, required_cols: list[str], frame_name: str) -> None:
+    missing_cols = [col for col in required_cols if col not in df.columns]
+    if missing_cols:
+        raise ValueError(f"{frame_name} is missing columns: {missing_cols}")
+
+
+def _ordered_device_ids(df: pd.DataFrame, expected_devices: int) -> list[str]:
+    observed = [str(device_id) for device_id in pd.Series(df["device_id"]).dropna().unique()]
+    known_observed = [device_id for device_id in KNOWN_DEVICE_ORDER if device_id in observed]
+    unknown_observed = sorted(
+        device_id for device_id in observed if device_id not in KNOWN_DEVICE_ORDER
+    )
+    ordered = known_observed + unknown_observed
+    if len(ordered) < expected_devices:
+        ordered.extend(device_id for device_id in KNOWN_DEVICE_ORDER if device_id not in ordered)
+    return ordered[:expected_devices]
+
+
+def build_device_level_features(
+    df: pd.DataFrame,
+    standby_baseline: float,
+    *,
+    expected_devices: int = 4,
+) -> pd.DataFrame:
+    """
+    Pivot long-format device data into deterministic wide-format features.
+
+    Creates `device_i_power_kw` and `device_i_active` columns for i=1..4 by
+    default. Device activity means `was_adjusting_temperature == 1` or observed
+    power draw above the supplied standby baseline. Duplicate device/timestamp
+    rows are collapsed with mean power and max adjustment flag before pivoting.
+    """
+    if standby_baseline < 0.0:
+        raise ValueError("standby_baseline must be non-negative.")
+    if expected_devices <= 0:
+        raise ValueError("expected_devices must be positive.")
+    _require_datetime_index(df, "Device-level feature data")
+    _require_columns(
+        df,
+        ["device_id", "power_draw_kw", "was_adjusting_temperature"],
+        "Device-level feature data",
+    )
+
+    unique_timestamps = pd.DatetimeIndex(sorted(df.index.unique()), name="timestamp")
+    wide_df = pd.DataFrame(index=unique_timestamps)
+
+    device_ids = _ordered_device_ids(df, expected_devices)
+    for dev_num, dev_id in enumerate(device_ids, start=1):
+        dev_df = df[df["device_id"].astype(str) == dev_id]
+        if dev_df.empty:
+            power = pd.Series(float("nan"), index=unique_timestamps, dtype="float64")
+            active = pd.Series(0.0, index=unique_timestamps, dtype="float64")
+        else:
+            collapsed = dev_df.groupby(level=0, sort=True).agg(
+                power_draw_kw=("power_draw_kw", "mean"),
+                was_adjusting_temperature=("was_adjusting_temperature", "max"),
+            )
+            collapsed = collapsed.reindex(unique_timestamps)
+            power = pd.to_numeric(collapsed["power_draw_kw"], errors="coerce")
+            was_adjusting = pd.to_numeric(
+                collapsed["was_adjusting_temperature"], errors="coerce"
+            ).fillna(0.0)
+            active = ((was_adjusting == 1.0) | (power > standby_baseline)).astype(float)
+
+        wide_df[f"device_{dev_num}_power_kw"] = power
+        wide_df[f"device_{dev_num}_active"] = active
+
+    return wide_df
+
+
+def build_room_level_features(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Build room-level features by aggregating per-device processed rows.
+
+    Temperature, return temperature, humidity, and CO2 use a timestamp median;
+    power uses a timestamp sum; energy assumes the 15-minute grid established by
+    the preprocessing pipeline.
+    """
+    _require_datetime_index(df, "Room-level feature data")
+    _require_columns(
+        df,
+        [
+            "status_temperature_in_celsius",
+            "status_temperature_return_in_celsius",
+            "status_humidity_in_percent",
+            "status_carbon_dioxide_in_ppm",
+            "power_draw_kw",
+        ],
+        "Room-level feature data",
+    )
+
+    grouped = df.sort_index().groupby(level=0, sort=True)
+
+    timestamps = pd.DatetimeIndex(sorted(df.index.unique()), name="timestamp")
+    room_df = pd.DataFrame(index=timestamps)
+
+    room_df["room_temp"] = grouped["status_temperature_in_celsius"].median()
+    room_df["room_return_temp"] = grouped["status_temperature_return_in_celsius"].median()
+    room_df["room_humidity"] = grouped["status_humidity_in_percent"].median()
+    room_df["room_co2"] = grouped["status_carbon_dioxide_in_ppm"].median()
+
+    room_df["room_power_kw"] = grouped["power_draw_kw"].sum()
+    room_df["room_energy_kwh"] = room_df["room_power_kw"] * FIFTEEN_MINUTE_HOURS
+
+    if "outside_temperature" in df.columns:
+        room_df["outside_temperature"] = grouped["outside_temperature"].first()
+    elif "status_temperature_outside_in_celsius" in df.columns:
+        room_df["outside_temperature"] = grouped["status_temperature_outside_in_celsius"].first()
+
+    for col in ["hour_of_day", "day_of_week", "is_weekend", "occupancy_flag"]:
+        if col in df.columns:
+            room_df[col] = grouped[col].first()
+
+    return room_df
+
+
+def build_event_features(
+    df_index: pd.DatetimeIndex,
+    df_space: pd.DataFrame,
+    preconditioning_window_hours: float = 2.0,
+) -> pd.DataFrame:
+    """
+    Build event-based features from space_events.csv for a 15-minute grid.
+    """
+    if not isinstance(df_index, pd.DatetimeIndex):
+        raise ValueError("df_index must be a DatetimeIndex.")
+    if preconditioning_window_hours < 0.0:
+        raise ValueError("preconditioning_window_hours must be non-negative.")
+    _require_columns(df_space, ["starts_at", "ends_at"], "Space event data")
+
+    events = df_space.copy()
+    events["starts_at"] = pd.to_datetime(events["starts_at"])
+    events["ends_at"] = pd.to_datetime(events["ends_at"])
+    malformed = events["ends_at"] < events["starts_at"]
+    if malformed.any():
+        raise ValueError("Space event data contains events ending before they start.")
+    events = events.sort_values("starts_at").reset_index(drop=True)
+
+    event_active = []
+    minutes_to_next_event = []
+    minutes_since_previous_event = []
+    next_event_start = []
+    next_event_end = []
+
+    for t in df_index:
+        t_end = t + EVENT_FEATURE_INTERVAL
+        active_events = events[(t < events["ends_at"]) & (t_end > events["starts_at"])]
+        event_active.append(0 if active_events.empty else 1)
+
+        future_events = events[events["starts_at"] > t]
+        if future_events.empty:
+            minutes_to_next_event.append(float("nan"))
+            next_event_start.append(pd.NaT)
+            next_event_end.append(pd.NaT)
+        else:
+            next_ev = future_events.iloc[0]
+            minutes_to_next_event.append((next_ev["starts_at"] - t).total_seconds() / 60.0)
+            next_event_start.append(next_ev["starts_at"])
+            next_event_end.append(next_ev["ends_at"])
+
+        past_events = events[events["ends_at"] <= t]
+        if past_events.empty:
+            minutes_since_previous_event.append(float("nan"))
+        else:
+            prev_ev = past_events.iloc[-1]
+            minutes_since_previous_event.append((t - prev_ev["ends_at"]).total_seconds() / 60.0)
+
+    feat_df = pd.DataFrame(index=df_index)
+    feat_df.index.name = df_index.name or "timestamp"
+    feat_df["event_active"] = event_active
+    feat_df["minutes_to_next_event"] = minutes_to_next_event
+    feat_df["minutes_since_previous_event"] = minutes_since_previous_event
+    feat_df["next_event_start"] = next_event_start
+    feat_df["next_event_end"] = next_event_end
+
+    precond_min = preconditioning_window_hours * 60.0
+    feat_df["inside_preconditioning_window"] = (
+        (feat_df["minutes_to_next_event"] > 0)
+        & (feat_df["minutes_to_next_event"] <= precond_min)
+        & (feat_df["event_active"] == 0)
+    ).astype(float)
+
+    return feat_df
+
+
+def check_coefficient_plausibility(
+    a: float, b: float, c_heat: float, c_cool: float, threshold: float = 1e-2
+) -> bool:
+    """
+    Check if the physical coefficients of the thermal model are plausible.
+    a > 0: indoor temperature has positive autocorrelation.
+    b >= -threshold: outside temperature effect is positive or near zero.
+    c_heat >= -threshold: heating power increases or doesn't change temperature.
+    c_cool >= -threshold: cooling power decreases or doesn't change temperature.
+    """
+    return a > 0 and b >= -threshold and c_heat >= -threshold and c_cool >= -threshold
+
+
+def train_thermal_model(
+    df: pd.DataFrame,
+    season: str,
+    split_timestamp: pd.Timestamp,
+    alpha: float = 1.0,
+) -> dict[str, Any]:
+    """
+    Train a grey-box thermal model using Ridge regression.
+    Equation:
+    T_next = a*T_room + b*T_outside + c_heat*total_heating_power
+             - c_cool*total_cooling_power + d*event_active
+    """
+    if season not in ["heating", "cooling"]:
+        raise ValueError("season must be 'heating' or 'cooling'")
+
+    df_copy = df.copy()
+    df_copy["T_next"] = df_copy["room_temp"].shift(-1)
+
+    feature_cols = ["room_temp", "outside_temperature", "room_power_kw", "event_active"]
+    df_copy = df_copy.dropna(subset=["T_next", *feature_cols])
+
+    train_df = df_copy[df_copy.index < split_timestamp]
+    if train_df.empty:
+        raise ValueError(f"Training data is empty before {split_timestamp}")
+
+    X_train = train_df[feature_cols]
+    y_train = train_df["T_next"]
+
+    scaler = StandardScaler()
+    X_train_scaled = scaler.fit_transform(X_train)
+
+    model = Ridge(alpha=alpha, fit_intercept=True)
+    model.fit(X_train_scaled, y_train)
+
+    w = model.coef_
+    a = w[0] / scaler.scale_[0]
+    b = w[1] / scaler.scale_[1]
+    c_power = w[2] / scaler.scale_[2]
+    d = w[3] / scaler.scale_[3]
+
+    if season == "heating":
+        c_heat = c_power
+        c_cool = 0.0
+    else:
+        c_heat = 0.0
+        c_cool = -c_power
+
+    is_plausible = check_coefficient_plausibility(a, b, c_heat, c_cool)
+
+    if not is_plausible:
+        fallback_reason = (
+            f"Implausible coefficients: a={a:.6f}, b={b:.6f}, "
+            f"c_heat={c_heat:.6f}, c_cool={c_cool:.6f}"
+        )
+        logger.warning(f"Activating room-level fallback for season {season}: {fallback_reason}")
+
+        fb_features = ["room_temp"]
+        X_train_fb = train_df[fb_features]
+        scaler_fb = StandardScaler()
+        X_train_fb_scaled = scaler_fb.fit_transform(X_train_fb)
+
+        model_fb = Ridge(alpha=alpha, fit_intercept=True)
+        model_fb.fit(X_train_fb_scaled, y_train)
+
+        w_fb = model_fb.coef_
+        a_fb = w_fb[0] / scaler_fb.scale_[0]
+        intercept_fb = model_fb.intercept_ - (w_fb[0] * scaler_fb.mean_[0] / scaler_fb.scale_[0])
+
+        return {
+            "model": model_fb,
+            "scaler": scaler_fb,
+            "season": season,
+            "is_fallback": True,
+            "fallback_reason": fallback_reason,
+            "a": a_fb,
+            "b": 0.0,
+            "c_heat": 0.0,
+            "c_cool": 0.0,
+            "d": 0.0,
+            "intercept": intercept_fb,
+            "features": fb_features,
+        }
+
+    intercept = model.intercept_ - (
+        w[0] * scaler.mean_[0] / scaler.scale_[0]
+        + w[1] * scaler.mean_[1] / scaler.scale_[1]
+        + w[2] * scaler.mean_[2] / scaler.scale_[2]
+        + w[3] * scaler.mean_[3] / scaler.scale_[3]
+    )
+
+    return {
+        "model": model,
+        "scaler": scaler,
+        "season": season,
+        "is_fallback": False,
+        "fallback_reason": None,
+        "a": a,
+        "b": b,
+        "c_heat": c_heat,
+        "c_cool": c_cool,
+        "d": d,
+        "intercept": intercept,
+        "features": feature_cols,
+    }
+
+
+def predict_temperature(model_dict: dict[str, Any], df: pd.DataFrame) -> pd.Series:
+    """
+    Predict next step's room temperature using the trained model dict.
+    """
+    features = model_dict["features"]
+    missing = [col for col in features if col not in df.columns]
+    if missing:
+        raise ValueError(f"Required features {missing} not found in input DataFrame.")
+
+    X = df[features]
+    non_nan_mask = X.notna().all(axis=1)
+
+    preds = pd.Series(float("nan"), index=df.index, dtype="float64")
+    if non_nan_mask.any():
+        X_valid = X[non_nan_mask]
+        X_scaled = model_dict["scaler"].transform(X_valid)
+        preds.loc[non_nan_mask] = model_dict["model"].predict(X_scaled)
+    return preds
+
+
+def train_device_power_model(
+    df: pd.DataFrame,
+    season: str,
+    split_timestamp: pd.Timestamp,
+    expected_devices: int = 4,
+) -> dict[str, Any]:
+    """
+    Train a per-device power model: for each device, learn typical active vs standby power.
+    """
+    train_df = df[df.index < split_timestamp]
+    device_params = {}
+    for i in range(1, expected_devices + 1):
+        power_col = f"device_{i}_power_kw"
+        active_col = f"device_{i}_active"
+        if power_col not in df.columns or active_col not in df.columns:
+            device_params[f"device_{i}"] = {
+                "active_power": 0.0,
+                "standby_power": 0.0,
+            }
+            continue
+        active_vals = train_df.loc[train_df[active_col] == 1.0, power_col].dropna()
+        standby_vals = train_df.loc[train_df[active_col] == 0.0, power_col].dropna()
+
+        active_power = active_vals.mean() if not active_vals.empty else 0.0
+        standby_power = standby_vals.mean() if not standby_vals.empty else 0.0
+
+        device_params[f"device_{i}"] = {
+            "active_power": float(active_power),
+            "standby_power": float(standby_power),
+        }
+    return {
+        "season": season,
+        "device_params": device_params,
+        "expected_devices": expected_devices,
+    }
+
+
+def predict_device_power(
+    model_dict: dict[str, Any],
+    df: pd.DataFrame,
+) -> pd.DataFrame:
+    """
+    Predict device power from control decisions (device on/off) without using measured power.
+    """
+    expected_devices = model_dict.get("expected_devices", 4)
+    device_params = model_dict["device_params"]
+    preds_df = pd.DataFrame(index=df.index)
+    for i in range(1, expected_devices + 1):
+        active_col = f"device_{i}_active"
+        if active_col in df.columns:
+            active_decisions = df[active_col].fillna(0.0)
+        else:
+            active_decisions = pd.Series(0.0, index=df.index)
+        p_active = device_params[f"device_{i}"]["active_power"]
+        p_standby = device_params[f"device_{i}"]["standby_power"]
+        preds_df[f"device_{i}_predicted_power_kw"] = (
+            active_decisions * p_active + (1.0 - active_decisions) * p_standby
+        )
+    return preds_df
+
+
+def save_model_artifacts(
+    artifacts_dir: str | pathlib.Path,
+    thermal_model_dict: dict[str, Any],
+    device_power_model_dict: dict[str, Any],
+    metrics: dict[str, Any] | None = None,
+    train_timestamps: dict[str, Any] | None = None,
+) -> None:
+    """
+    Save trained model artifacts:
+    - thermal_model.joblib
+    - scaler.joblib
+    - feature_columns.json
+    - model_metadata.json
+    - device_power_model.joblib
+
+    To support both seasons, we save both season-prefixed files and the standard files.
+    """
+    dir_path = pathlib.Path(artifacts_dir)
+    dir_path.mkdir(parents=True, exist_ok=True)
+
+    season = thermal_model_dict.get("season", "heating")
+
+    # Construct metadata
+    metadata = {
+        "season": season,
+        "train_timestamps": train_timestamps or {},
+        "coefficients": {
+            "a": thermal_model_dict.get("a"),
+            "b": thermal_model_dict.get("b"),
+            "c_heat": thermal_model_dict.get("c_heat"),
+            "c_cool": thermal_model_dict.get("c_cool"),
+            "d": thermal_model_dict.get("d"),
+            "intercept": thermal_model_dict.get("intercept"),
+        },
+        "is_fallback": thermal_model_dict.get("is_fallback", False),
+        "fallback_reason": thermal_model_dict.get("fallback_reason"),
+        "metrics": metrics or {},
+        "features": thermal_model_dict.get("features", []),
+        "device_power_model_params": device_power_model_dict.get("device_params", {}),
+    }
+
+    # Files to write
+    files_to_write = [
+        # standard filenames
+        ("thermal_model.joblib", thermal_model_dict["model"], "joblib"),
+        ("scaler.joblib", thermal_model_dict["scaler"], "joblib"),
+        ("feature_columns.json", thermal_model_dict["features"], "json"),
+        ("model_metadata.json", metadata, "json"),
+        ("device_power_model.joblib", device_power_model_dict, "joblib"),
+        # season-prefixed filenames for notebooks/multi-season safety
+        (f"{season}_thermal_model.joblib", thermal_model_dict["model"], "joblib"),
+        (f"{season}_scaler.joblib", thermal_model_dict["scaler"], "joblib"),
+        (f"{season}_feature_columns.json", thermal_model_dict["features"], "json"),
+        (f"{season}_model_metadata.json", metadata, "json"),
+        (f"{season}_device_power_model.joblib", device_power_model_dict, "joblib"),
+    ]
+
+    for filename, obj, format_type in files_to_write:
+        file_path = dir_path / filename
+        if format_type == "joblib":
+            joblib.dump(obj, file_path)
+        elif format_type == "json":
+            with open(file_path, "w") as f:
+                json.dump(obj, f, indent=2)
+
+
+def load_model_artifacts(
+    artifacts_dir: str | pathlib.Path,
+    season: str | None = None,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """
+    Load saved model artifacts and reconstruct model dictionaries:
+    - thermal_model_dict
+    - device_power_model_dict
+    """
+    dir_path = pathlib.Path(artifacts_dir)
+
+    # Decide prefix
+    prefix = f"{season}_" if season else ""
+
+    # Check if files exist. Fall back to unprefixed if prefixed don't exist.
+    thermal_model_path = dir_path / f"{prefix}thermal_model.joblib"
+    if season and not thermal_model_path.exists():
+        # Fallback to unprefixed
+        thermal_model_path = dir_path / "thermal_model.joblib"
+        scaler_path = dir_path / "scaler.joblib"
+        metadata_path = dir_path / "model_metadata.json"
+        power_model_path = dir_path / "device_power_model.joblib"
+    else:
+        scaler_path = dir_path / f"{prefix}scaler.joblib"
+        metadata_path = dir_path / f"{prefix}model_metadata.json"
+        power_model_path = dir_path / f"{prefix}device_power_model.joblib"
+
+    if not thermal_model_path.exists():
+        raise FileNotFoundError(f"Thermal model file not found: {thermal_model_path}")
+    if not scaler_path.exists():
+        raise FileNotFoundError(f"Scaler file not found: {scaler_path}")
+    if not metadata_path.exists():
+        raise FileNotFoundError(f"Model metadata file not found: {metadata_path}")
+    if not power_model_path.exists():
+        raise FileNotFoundError(f"Device power model file not found: {power_model_path}")
+
+    # Load objects
+    model = joblib.load(thermal_model_path)
+    scaler = joblib.load(scaler_path)
+    with open(metadata_path) as f:
+        metadata = json.load(f)
+    device_power_model_dict = joblib.load(power_model_path)
+
+    # Reconstruct thermal_model_dict
+    coefs = metadata.get("coefficients", {})
+    thermal_model_dict = {
+        "model": model,
+        "scaler": scaler,
+        "season": metadata.get("season", season),
+        "is_fallback": metadata.get("is_fallback", False),
+        "fallback_reason": metadata.get("fallback_reason"),
+        "a": coefs.get("a"),
+        "b": coefs.get("b"),
+        "c_heat": coefs.get("c_heat"),
+        "c_cool": coefs.get("c_cool"),
+        "d": coefs.get("d"),
+        "intercept": coefs.get("intercept"),
+        "features": metadata.get(
+            "features",
+            ["room_temp", "outside_temperature", "room_power_kw", "event_active"]
+            if not metadata.get("is_fallback")
+            else ["room_temp"],
+        ),
+    }
+
+    # If features not directly in metadata top-level, check if we saved feature_columns.json
+    feature_cols_path = dir_path / f"{prefix}feature_columns.json"
+    if not feature_cols_path.exists() and season:
+        feature_cols_path = dir_path / "feature_columns.json"
+    if feature_cols_path.exists():
+        with open(feature_cols_path) as f:
+            thermal_model_dict["features"] = json.load(f)
+
+    return thermal_model_dict, device_power_model_dict
+
+
+@dataclass
+class EventControlConfig:
+    mode: str  # "heating" or "cooling"
+    min_temp: float
+    max_temp: float
+    precondition_hours: float = 2.0
+
+    def validate(self) -> None:
+        """
+        Validate the event-control configuration.
+        """
+        if self.mode not in ["heating", "cooling"]:
+            raise ValueError(f"Invalid mode '{self.mode}'. Expected 'heating' or 'cooling'.")
+        if self.min_temp >= self.max_temp:
+            raise ValueError(
+                f"Invalid comfort band: min_temp ({self.min_temp}) "
+                f"must be less than max_temp ({self.max_temp})."
+            )
+        if self.precondition_hours < 0.0:
+            raise ValueError("precondition_hours must be non-negative.")
+
+
+@dataclass
+class ConsolidatedEventWindow:
+    window_id: str
+    starts_at: datetime
+    ends_at: datetime
+    original_event_ids: list[str] = field(default_factory=list)
+    rationale: str = ""
+
+
+@dataclass
+class ScheduleRow:
+    event_id: str
+    mode: str
+    start_time: datetime
+    device_1_on: int
+    device_2_on: int
+    device_3_on: int
+    device_4_on: int
+    target_temp: float
+    predicted_temp_at_start: float
+    expected_kwh: float
+    expected_cost: float
+    expected_co2: float
+    is_feasible: bool = True
+    violation_celsius: float = 0.0
+    selection_reason: str = ""
+    feasible: bool = True
+    comfort_violation_c: float = 0.0
+    candidate_start_offset_minutes: int = 0
+    active_device_count: int = 0
+
+
+def validate_optimizer_inputs(
+    mode: str,
+    min_temp: float,
+    max_temp: float,
+    precondition_hours: float = 2.0,
+) -> None:
+    """
+    Validate optimizer inputs (mode, comfort bands, preconditioning hours).
+    """
+    config = EventControlConfig(
+        mode=mode, min_temp=min_temp, max_temp=max_temp, precondition_hours=precondition_hours
+    )
+    config.validate()
+
+
+def get_device_id_mapping(df: pd.DataFrame, expected_devices: int = 4) -> dict[str, int]:
+    """
+    Get deterministic mapping of device ID strings to 1-based indices (1 to expected_devices).
+    """
+    device_ids = _ordered_device_ids(df, expected_devices)
+    return {dev_id: idx for idx, dev_id in enumerate(device_ids, start=1)}
+
+
+def discover_device_columns(
+    df: pd.DataFrame, expected_devices: int = 4
+) -> dict[str, dict[str, str]]:
+    """
+    Discover and map device indices to their respective power and active
+    column names in a wide DataFrame.
+
+    Returns a dict mapping e.g., 'device_1' -> {'power': 'device_1_power_kw',
+    'active': 'device_1_active'}
+    """
+    mapping = {}
+    for i in range(1, expected_devices + 1):
+        power_col = f"device_{i}_power_kw"
+        active_col = f"device_{i}_active"
+        if power_col in df.columns and active_col in df.columns:
+            mapping[f"device_{i}"] = {"power": power_col, "active": active_col}
+    return mapping
+
+
+def extract_events_from_frame(df: pd.DataFrame, flag_col: str = "occupancy_flag") -> pd.DataFrame:
+    """
+    Extract event windows (starts_at, ends_at) from a processed/aligned DataFrame
+    where flag_col (default: 'occupancy_flag') is 1.
+    """
+    if flag_col not in df.columns:
+        raise ValueError(f"Column '{flag_col}' not found in DataFrame.")
+
+    if not isinstance(df.index, pd.DatetimeIndex):
+        if "timestamp" in df.columns:
+            df_copy = df.copy()
+            df_copy["timestamp"] = pd.to_datetime(df_copy["timestamp"])
+            df_copy.set_index("timestamp", inplace=True)
+        else:
+            raise ValueError(
+                "DataFrame index must be a DatetimeIndex or contain a 'timestamp' column."
+            )
+    else:
+        df_copy = df.copy()
+
+    # De-duplicate by timestamp index to keep a clean 1D sequence of occupancy flags
+    df_copy = df_copy[[flag_col]].sort_index()
+    df_copy = df_copy[~df_copy.index.duplicated(keep="first")]
+
+    is_event = df_copy[flag_col] == 1
+    if not is_event.any():
+        return pd.DataFrame(columns=["starts_at", "ends_at"])
+
+    # Find contiguous blocks of 1s
+    # Shift and cumsum to identify contiguous group IDs
+    group_ids = (is_event != is_event.shift()).cumsum()
+    event_groups = df_copy[is_event].groupby(group_ids[is_event])
+
+    extracted = []
+    for _, group in event_groups:
+        starts_at = group.index.min()
+        ends_at = group.index.max() + pd.Timedelta(minutes=15)
+        extracted.append({"starts_at": starts_at, "ends_at": ends_at})
+
+    return pd.DataFrame(extracted, columns=["starts_at", "ends_at"])
+
+
+def consolidate_event_windows(
+    events_df: pd.DataFrame, merge_threshold_minutes: float = 60.0
+) -> list[ConsolidatedEventWindow]:
+    """
+    Consolidate space events by merging duplicate, overlapping, or close back-to-back windows.
+
+    Args:
+        events_df: pd.DataFrame with ['starts_at', 'ends_at'] columns, and optionally
+                   ['event_id']. If 'event_id' is missing, it will auto-assign sequential
+                   IDs ('E01', 'E02', etc.).
+        merge_threshold_minutes: Threshold in minutes. If the gap between two event windows
+                                 is <= this threshold, they are merged.
+                                 Must be non-negative.
+
+    Returns:
+        List of ConsolidatedEventWindow dataclass instances.
+    """
+    if merge_threshold_minutes < 0:
+        raise ValueError("merge_threshold_minutes must be non-negative.")
+
+    required = ["starts_at", "ends_at"]
+    for col in required:
+        if col not in events_df.columns:
+            raise ValueError(f"Missing required column: {col}")
+
+    if events_df.empty:
+        return []
+
+    df = events_df.copy()
+    df["starts_at"] = pd.to_datetime(df["starts_at"])
+    df["ends_at"] = pd.to_datetime(df["ends_at"])
+
+    # Sort events by starts_at, then ends_at
+    df = df.sort_values(by=["starts_at", "ends_at"]).reset_index(drop=True)
+
+    if "event_id" not in df.columns:
+        df["event_id"] = [f"E{i + 1:02d}" for i in range(len(df))]
+    else:
+        df["event_id"] = df["event_id"].astype(str)
+
+    consolidated: list[dict[str, Any]] = []
+    current_start = df.loc[0, "starts_at"]
+    current_end = df.loc[0, "ends_at"]
+    current_ids = [df.loc[0, "event_id"]]
+
+    for i in range(1, len(df)):
+        row = df.iloc[i]
+        start = row["starts_at"]
+        end = row["ends_at"]
+        ev_id = row["event_id"]
+
+        # Calculate gap in minutes between current_end and next start
+        gap_minutes = (start - current_end).total_seconds() / 60.0
+
+        if gap_minutes <= merge_threshold_minutes:
+            # Merge! Update current_end if this event ends later
+            current_end = max(current_end, end)
+            current_ids.append(ev_id)
+        else:
+            # Save current and start a new consolidated window
+            consolidated.append(
+                {
+                    "current_start": current_start,
+                    "current_end": current_end,
+                    "current_ids": current_ids,
+                }
+            )
+            current_start = start
+            current_end = end
+            current_ids = [ev_id]
+
+    # Add the last one
+    consolidated.append(
+        {"current_start": current_start, "current_end": current_end, "current_ids": current_ids}
+    )
+
+    # Convert to final structured format with rationale
+    result: list[ConsolidatedEventWindow] = []
+    for idx, item in enumerate(consolidated, start=1):
+        w_id = f"W{idx:02d}"
+        raw_ids = item["current_ids"]
+        ids: list[str] = sorted(list({str(x) for x in raw_ids}))
+        start = pd.Timestamp(item["current_start"]).to_pydatetime()
+        end = pd.Timestamp(item["current_end"]).to_pydatetime()
+
+        if len(ids) == 1:
+            rat = f"Window contains single event: {ids[0]}."
+        else:
+            rat = f"Merged {len(ids)} events due to overlap or close proximity: {', '.join(ids)}."
+
+        result.append(
+            ConsolidatedEventWindow(
+                window_id=w_id,
+                starts_at=start,
+                ends_at=end,
+                original_event_ids=ids,
+                rationale=rat,
+            )
+        )
+
+    return result
+
+
+def generate_device_subsets(
+    expected_devices: int, max_simultaneous_devices: int
+) -> list[tuple[int, ...]]:
+    """
+    Generate all valid active device subsets subject to max simultaneous devices constraints.
+    """
+    if expected_devices <= 0:
+        raise ValueError("expected_devices must be positive.")
+    if max_simultaneous_devices < 0 or max_simultaneous_devices > expected_devices:
+        raise ValueError("max_simultaneous_devices must be between 0 and expected_devices.")
+
+    subsets = []
+    for r in range(0, max_simultaneous_devices + 1):
+        for combo in itertools.combinations(range(1, expected_devices + 1), r):
+            subsets.append(combo)
+    return subsets
+
+
+def get_historical_value(df: pd.DataFrame, col: str, ts: pd.Timestamp, default: float) -> float:
+    """
+    Look up a value in a DataFrame column by timestamp.
+    If the exact timestamp is missing or is NaN, finds the nearest non-NaN timestamp.
+    """
+    if col not in df.columns or df.empty:
+        return default
+    if ts in df.index:
+        val = df.loc[ts, col]
+        if isinstance(val, pd.Series):
+            val = val.iloc[0]
+        if not pd.isna(val):
+            return float(cast(Any, val))
+    # Find closest timestamp (resolution-independent; avoids asi8/.value unit mismatch)
+    dt_index: pd.DatetimeIndex = cast(pd.DatetimeIndex, df.index)
+    closest_idx = int(dt_index.get_indexer(pd.Index([ts]), method="nearest")[0])
+    val = df.iloc[closest_idx][col]
+    if not pd.isna(val):
+        return float(cast(Any, val))
+    return default
+
+
+def simulate_preconditioning(
+    df: pd.DataFrame,
+    thermal_model_dict: dict[str, Any],
+    device_power_model_dict: dict[str, Any],
+    starts_at: datetime,
+    offset_minutes: int,
+    active_devices: list[int],
+    electricity_price: float,
+    co2_factor: float,
+    comfort_min: float,
+    comfort_max: float,
+    expected_devices: int = 4,
+) -> dict[str, Any]:
+    """
+    Simulate a candidate preconditioning schedule for a single event.
+    """
+    if offset_minutes < 0:
+        raise ValueError("offset_minutes must be non-negative.")
+    if offset_minutes % 15 != 0:
+        raise ValueError("offset_minutes must be a multiple of 15.")
+
+    ts_start = pd.Timestamp(starts_at)
+    ts_precond_start = ts_start - pd.Timedelta(minutes=offset_minutes)
+
+    # Initial temperature at preconditioning start time
+    current_temp = get_historical_value(df, "room_temp", ts_precond_start, 20.0)
+
+    device_params = device_power_model_dict.get("device_params", {})
+
+    # Calculate step power
+    step_power_kw = 0.0
+    for j in range(1, expected_devices + 1):
+        params = device_params.get(f"device_{j}", {})
+        p_active = params.get("active_power", 3.0)
+        p_standby = params.get("standby_power", 0.05)
+        if j in active_devices:
+            step_power_kw += p_active
+        else:
+            step_power_kw += p_standby
+
+    num_steps = offset_minutes // 15
+    total_kwh = 0.0
+
+    for step in range(num_steps):
+        t_step = ts_precond_start + pd.Timedelta(minutes=15 * step)
+
+        # Accumulate energy
+        total_kwh += step_power_kw * 0.25
+
+        # Build features for prediction
+        step_data = {}
+        for feat in thermal_model_dict.get("features", []):
+            if feat == "room_temp":
+                step_data["room_temp"] = current_temp
+            elif feat == "room_power_kw":
+                step_data["room_power_kw"] = step_power_kw
+            elif feat == "event_active":
+                step_data["event_active"] = 0.0
+            else:
+                step_data[feat] = get_historical_value(df, feat, t_step, 0.0)
+
+        # If the features list is empty (fallback model might not list features properly)
+        if not step_data:
+            step_data["room_temp"] = current_temp
+
+        step_df = pd.DataFrame([step_data], index=[t_step])
+        next_temp = predict_temperature(thermal_model_dict, step_df).iloc[0]
+        current_temp = next_temp
+
+    expected_cost = total_kwh * electricity_price
+    expected_co2 = total_kwh * co2_factor
+
+    # Comfort violation
+    violation_celsius = max(0.0, comfort_min - current_temp) + max(0.0, current_temp - comfort_max)
+    is_feasible = violation_celsius <= COMFORT_FEASIBILITY_TOLERANCE_C
+
+    return {
+        "predicted_temp_at_start": current_temp,
+        "expected_kwh": total_kwh,
+        "expected_cost": expected_cost,
+        "expected_co2": expected_co2,
+        "violation_celsius": violation_celsius,
+        "is_feasible": is_feasible,
+    }
+
+
+def simulate_all_candidates(
+    df: pd.DataFrame,
+    thermal_model_dict: dict[str, Any],
+    device_power_model_dict: dict[str, Any],
+    starts_at: datetime,
+    ends_at: datetime,
+    candidate_offsets: list[int],
+    max_simultaneous_devices: int,
+    electricity_price: float,
+    co2_factor: float,
+    comfort_min: float,
+    comfort_max: float,
+    expected_devices: int = 4,
+) -> list[dict[str, Any]]:
+    """
+    Generate and simulate all candidate schedules for a single event window.
+    """
+    device_subsets = generate_device_subsets(expected_devices, max_simultaneous_devices)
+    candidates = []
+    for offset in candidate_offsets:
+        for devices in device_subsets:
+            # Run simulation
+            res = simulate_preconditioning(
+                df=df,
+                thermal_model_dict=thermal_model_dict,
+                device_power_model_dict=device_power_model_dict,
+                starts_at=starts_at,
+                offset_minutes=offset,
+                active_devices=list(devices),
+                electricity_price=electricity_price,
+                co2_factor=co2_factor,
+                comfort_min=comfort_min,
+                comfort_max=comfort_max,
+                expected_devices=expected_devices,
+            )
+            # Add metadata to result
+            res.update(
+                {
+                    "offset_minutes": offset,
+                    "active_devices": devices,
+                    "active_device_count": len(devices),
+                }
+            )
+            candidates.append(res)
+    return candidates
+
+
+SCHEDULE_OUTPUT_COLUMNS: list[str] = [
+    "event_id",
+    "mode",
+    "start_time",
+    "device_1_on",
+    "device_2_on",
+    "device_3_on",
+    "device_4_on",
+    "target_temp",
+    "predicted_temp_at_start",
+    "expected_kwh",
+    "expected_cost",
+    "expected_co2",
+    "feasible",
+    "selection_reason",
+    "comfort_violation_c",
+    "candidate_start_offset_minutes",
+    "active_device_count",
+]
+
+EVENT_CONTROL_REPORT_DIR = (
+    PROJECT_ROOT / "backend" / "artifacts" / "event_device_control" / "reports"
+)
+
+
+COMPARISON_TIMESERIES_COLUMNS: list[str] = [
+    "event_id",
+    "timestamp",
+    "baseline_power_kw",
+    "smart_power_kw",
+    "baseline_kwh",
+    "smart_kwh",
+    "baseline_cost_eur",
+    "smart_cost_eur",
+    "baseline_co2_kg",
+    "smart_co2_kg",
+    "cumulative_baseline_kwh",
+    "cumulative_smart_kwh",
+    "cumulative_baseline_cost_eur",
+    "cumulative_smart_cost_eur",
+    "cumulative_baseline_co2_kg",
+    "cumulative_smart_co2_kg",
+    "room_temp",
+    "comfort_min",
+    "comfort_max",
+    "inside_comfort_band",
+    "degree_minutes_violation",
+    "smart_control_active",
+]
+
+EVENT_CONTROL_REPORT_METRIC_COLUMNS: list[str] = [
+    "baseline_kwh",
+    "smart_kwh",
+    "energy_savings_kwh",
+    "energy_savings_pct",
+    "baseline_cost_eur",
+    "smart_cost_eur",
+    "cost_savings_eur",
+    "cost_savings_pct",
+    "baseline_co2_kg",
+    "smart_co2_kg",
+    "co2_savings_kg",
+    "co2_savings_pct",
+    "temperature_mae_c",
+    "temperature_rmse_c",
+    "comfort_hit_rate",
+    "degree_minutes_violation",
+    "report_status",
+    "report_reason",
+]
+
+
+def _validation_interval_hours(index: pd.DatetimeIndex) -> float:
+    if len(index) < MIN_INTERVAL_POINTS:
+        return 0.25
+    diffs = pd.Series(index.sort_values()).diff().dropna()
+    if diffs.empty:
+        return 0.25
+    return float(diffs.mode().iloc[0] / pd.Timedelta(hours=1))
+
+
+def _baseline_power_column(validation_df: pd.DataFrame) -> str:
+    for col in ["room_power_kw", "baseline_power_kw", "power_draw_kw"]:
+        if col in validation_df.columns:
+            return col
+    raise ValueError(
+        "validation_df must contain a baseline power column such as room_power_kw or power_draw_kw."
+    )
+
+
+def _require_schedule_columns(schedule_df: pd.DataFrame, required: list[str]) -> None:
+    missing = [col for col in required if col not in schedule_df.columns]
+    if missing:
+        raise ValueError(f"schedule_df missing required columns: {missing}")
+
+
+def classify_event_control_status(
+    *,
+    feasible: bool,
+    comfort_violation_c: float,
+    cost_savings_eur: float,
+    neutral_tolerance_eur: float = 1e-9,
+) -> tuple[str, str]:
+    """Classify a per-event report row without filtering away edge cases."""
+    if not feasible:
+        return "infeasible", "selected schedule was marked infeasible by the optimizer"
+    if comfort_violation_c > 0.0:
+        return "comfort_missed", f"comfort violation remained at {comfort_violation_c:.3f} C"
+    if cost_savings_eur < -neutral_tolerance_eur:
+        return (
+            "negative_savings",
+            f"smart control increased cost by {abs(cost_savings_eur):.3f} EUR",
+        )
+    if abs(cost_savings_eur) <= neutral_tolerance_eur:
+        return "neutral_savings", "smart-control cost savings are near zero"
+    return "savings", f"smart control saved {cost_savings_eur:.3f} EUR"
+
+
+def _expanded_smart_controls(
+    validation_index: pd.DatetimeIndex,
+    schedule_df: pd.DataFrame,
+    expected_devices: int,
+) -> pd.DataFrame:
+    controls = pd.DataFrame(
+        0.0,
+        index=validation_index,
+        columns=[f"device_{i}_active" for i in range(1, expected_devices + 1)],
+    )
+    controls["event_id"] = ""
+    controls["smart_control_active"] = 0.0
+
+    for _, row in schedule_df.iterrows():
+        start = pd.Timestamp(row["start_time"])
+        end_value = row.get("window_starts_at", pd.NaT)
+        if pd.isna(end_value):
+            end_value = row.get("window_ends_at", start + pd.Timedelta(minutes=15))
+        end = pd.Timestamp(end_value)
+        mask = (controls.index >= start) & (controls.index < end)
+        if not mask.any():
+            continue
+        event_id = str(row.get("event_id", ""))
+        for i in range(1, expected_devices + 1):
+            schedule_col = f"device_{i}_on"
+            active_col = f"device_{i}_active"
+            controls.loc[mask, active_col] = float(row.get(schedule_col, 0.0))
+        existing = controls.loc[mask, "event_id"].astype(str)
+        controls.loc[mask, "event_id"] = np.where(
+            existing == "", event_id, existing + ";" + event_id
+        )
+        controls.loc[mask, "smart_control_active"] = 1.0
+    return controls
+
+
+def build_event_control_comparison_timeseries(
+    validation_df: pd.DataFrame,
+    schedule_df: pd.DataFrame,
+    device_power_model_dict: dict[str, Any],
+    *,
+    electricity_price: float = 0.15,
+    co2_factor: float = 0.4,
+    comfort_min: float | None = None,
+    comfort_max: float | None = None,
+    expected_devices: int | None = None,
+) -> pd.DataFrame:
+    """
+    Expand selected schedules into a 15-minute leakage-safe baseline-vs-smart series.
+
+    Baseline power comes from measured validation power columns. Smart power is simulated
+    only from schedule flags plus the learned device power model via predict_device_power().
+    """
+    if not isinstance(validation_df.index, pd.DatetimeIndex):
+        raise ValueError("validation_df must be indexed by a DatetimeIndex.")
+    _require_schedule_columns(schedule_df, ["event_id", "start_time"])
+    baseline_col = _baseline_power_column(validation_df)
+    expected_devices = int(expected_devices or device_power_model_dict.get("expected_devices", 4))
+    device_cols = [f"device_{i}_on" for i in range(1, expected_devices + 1)]
+    _require_schedule_columns(schedule_df, device_cols)
+
+    comparison = pd.DataFrame(index=validation_df.index.copy())
+    comparison["event_id"] = ""
+    comparison["timestamp"] = comparison.index
+    comparison["baseline_power_kw"] = validation_df[baseline_col].astype(float).fillna(0.0)
+
+    comp_idx = cast(pd.DatetimeIndex, comparison.index)
+    controls = _expanded_smart_controls(comp_idx, schedule_df, expected_devices)
+    smart_inputs = controls[[f"device_{i}_active" for i in range(1, expected_devices + 1)]]
+    smart_predictions = predict_device_power(device_power_model_dict, smart_inputs)
+    smart_power_cols = [f"device_{i}_predicted_power_kw" for i in range(1, expected_devices + 1)]
+    comparison["smart_power_kw"] = smart_predictions[smart_power_cols].sum(axis=1).astype(float)
+
+    interval_hours = _validation_interval_hours(comp_idx)
+    comparison["baseline_kwh"] = comparison["baseline_power_kw"] * interval_hours
+    comparison["smart_kwh"] = comparison["smart_power_kw"] * interval_hours
+    comparison["baseline_cost_eur"] = comparison["baseline_kwh"] * float(electricity_price)
+    comparison["smart_cost_eur"] = comparison["smart_kwh"] * float(electricity_price)
+    comparison["baseline_co2_kg"] = comparison["baseline_kwh"] * float(co2_factor)
+    comparison["smart_co2_kg"] = comparison["smart_kwh"] * float(co2_factor)
+    comparison["cumulative_baseline_kwh"] = comparison["baseline_kwh"].cumsum()
+    comparison["cumulative_smart_kwh"] = comparison["smart_kwh"].cumsum()
+    comparison["cumulative_baseline_cost_eur"] = comparison["baseline_cost_eur"].cumsum()
+    comparison["cumulative_smart_cost_eur"] = comparison["smart_cost_eur"].cumsum()
+    comparison["cumulative_baseline_co2_kg"] = comparison["baseline_co2_kg"].cumsum()
+    comparison["cumulative_smart_co2_kg"] = comparison["smart_co2_kg"].cumsum()
+
+    comparison["room_temp"] = (
+        validation_df["room_temp"].astype(float) if "room_temp" in validation_df.columns else np.nan
+    )
+    comparison["comfort_min"] = np.nan if comfort_min is None else float(comfort_min)
+    comparison["comfort_max"] = np.nan if comfort_max is None else float(comfort_max)
+    if comfort_min is None or comfort_max is None:
+        comparison["inside_comfort_band"] = np.nan
+        comparison["degree_minutes_violation"] = np.nan
+    else:
+        below = (float(comfort_min) - comparison["room_temp"]).clip(lower=0.0)
+        above = (comparison["room_temp"] - float(comfort_max)).clip(lower=0.0)
+        comparison["inside_comfort_band"] = ((below == 0.0) & (above == 0.0)).astype(float)
+        comparison["degree_minutes_violation"] = (below + above) * interval_hours * 60.0
+    comparison["smart_control_active"] = controls["smart_control_active"]
+    comparison["event_id"] = controls["event_id"]
+    for i in range(1, expected_devices + 1):
+        comparison[f"smart_device_{i}_active"] = controls[f"device_{i}_active"]
+        comparison[f"smart_device_{i}_power_kw"] = smart_predictions[
+            f"device_{i}_predicted_power_kw"
+        ]
+
+    ordered = COMPARISON_TIMESERIES_COLUMNS + [
+        col for col in comparison.columns if col not in COMPARISON_TIMESERIES_COLUMNS
+    ]
+    return comparison[ordered]
+
+
+def _event_window_mask(comparison_df: pd.DataFrame, row: pd.Series) -> pd.Series:
+    if not isinstance(comparison_df.index, pd.DatetimeIndex):
+        raise ValueError("comparison_df must be indexed by a DatetimeIndex.")
+    start_val = row.get("start_time")
+    if pd.isna(start_val) or start_val is None:
+        raise ValueError("row missing start_time")
+    start = pd.Timestamp(start_val)
+    end_value = row.get("window_ends_at", pd.NaT)
+    if pd.isna(end_value):
+        end_value = row.get("window_starts_at", pd.NaT)
+    end = start + pd.Timedelta(minutes=15) if pd.isna(end_value) else pd.Timestamp(end_value)
+    if end <= start:
+        end = start + pd.Timedelta(minutes=15)
+    mask = (comparison_df.index >= start) & (comparison_df.index < end)
+    return pd.Series(mask, index=comparison_df.index)
+
+
+def _pct_savings(savings: float, baseline: float) -> float:
+    if abs(baseline) <= BASELINE_SAVINGS_EPSILON:
+        return 0.0
+    return float(savings / baseline * 100.0)
+
+
+def augment_event_control_report(
+    schedule_df: pd.DataFrame,
+    comparison_df: pd.DataFrame,
+    *,
+    comfort_min: float | None = None,
+    comfort_max: float | None = None,
+) -> pd.DataFrame:
+    """Preserve schedule rows and append event/window comparison and status metrics."""
+    _require_schedule_columns(
+        schedule_df, ["event_id", "start_time", "feasible", "comfort_violation_c"]
+    )
+    metric_rows: list[dict[str, Any]] = []
+    for _, row in schedule_df.iterrows():
+        event_slice = comparison_df.loc[_event_window_mask(comparison_df, row)]
+        baseline_kwh = (
+            float(event_slice["baseline_kwh"].sum()) if "baseline_kwh" in event_slice else 0.0
+        )
+        smart_kwh = float(event_slice["smart_kwh"].sum()) if "smart_kwh" in event_slice else 0.0
+        baseline_cost = (
+            float(event_slice["baseline_cost_eur"].sum())
+            if "baseline_cost_eur" in event_slice
+            else 0.0
+        )
+        smart_cost = (
+            float(event_slice["smart_cost_eur"].sum()) if "smart_cost_eur" in event_slice else 0.0
+        )
+        baseline_co2 = (
+            float(event_slice["baseline_co2_kg"].sum()) if "baseline_co2_kg" in event_slice else 0.0
+        )
+        smart_co2 = (
+            float(event_slice["smart_co2_kg"].sum()) if "smart_co2_kg" in event_slice else 0.0
+        )
+        energy_savings = baseline_kwh - smart_kwh
+        cost_savings = baseline_cost - smart_cost
+        co2_savings = baseline_co2 - smart_co2
+
+        temps = (
+            event_slice["room_temp"].dropna()
+            if "room_temp" in event_slice
+            else pd.Series(dtype="float64")
+        )
+        target = float(row.get("target_temp", np.nan))
+        if temps.empty or pd.isna(target):
+            mae = float("nan")
+            rmse = float("nan")
+        else:
+            errors = temps.astype(float) - target
+            mae = float(errors.abs().mean())
+            rmse = float(np.sqrt((errors**2).mean()))
+
+        if (
+            "inside_comfort_band" in event_slice
+            and event_slice["inside_comfort_band"].notna().any()
+        ):
+            comfort_hit_rate = float(event_slice["inside_comfort_band"].mean())
+        elif comfort_min is not None and comfort_max is not None and not temps.empty:
+            comfort_hit_rate = float(((temps >= comfort_min) & (temps <= comfort_max)).mean())
+        else:
+            comfort_hit_rate = float("nan")
+        degree_minutes = (
+            float(event_slice["degree_minutes_violation"].sum())
+            if "degree_minutes_violation" in event_slice
+            else float("nan")
+        )
+        feasible = bool(row.get("feasible", True))
+        comfort_violation = float(row.get("comfort_violation_c", 0.0))
+        status, reason = classify_event_control_status(
+            feasible=feasible,
+            comfort_violation_c=comfort_violation,
+            cost_savings_eur=cost_savings,
+        )
+        metric_rows.append(
+            {
+                "baseline_kwh": baseline_kwh,
+                "smart_kwh": smart_kwh,
+                "energy_savings_kwh": energy_savings,
+                "energy_savings_pct": _pct_savings(energy_savings, baseline_kwh),
+                "baseline_cost_eur": baseline_cost,
+                "smart_cost_eur": smart_cost,
+                "cost_savings_eur": cost_savings,
+                "cost_savings_pct": _pct_savings(cost_savings, baseline_cost),
+                "baseline_co2_kg": baseline_co2,
+                "smart_co2_kg": smart_co2,
+                "co2_savings_kg": co2_savings,
+                "co2_savings_pct": _pct_savings(co2_savings, baseline_co2),
+                "temperature_mae_c": mae,
+                "temperature_rmse_c": rmse,
+                "comfort_hit_rate": comfort_hit_rate,
+                "degree_minutes_violation": degree_minutes,
+                "report_status": status,
+                "report_reason": reason,
+            }
+        )
+    metrics_df = pd.DataFrame(metric_rows, index=schedule_df.index)
+    report_df = pd.concat(
+        [schedule_df.reset_index(drop=True), metrics_df.reset_index(drop=True)], axis=1
+    )
+    return report_df[[*schedule_df.columns, *EVENT_CONTROL_REPORT_METRIC_COLUMNS]]
+
+
+CANDIDATE_DIAGNOSTIC_COLUMNS: list[str] = [
+    "window_id",
+    "candidate_rank",
+    "selected",
+    "feasible",
+    "selection_reason",
+    "comfort_violation_c",
+    "candidate_start_offset_minutes",
+    "active_device_count",
+    "active_devices",
+    "predicted_temp_at_start",
+    "expected_kwh",
+    "expected_cost",
+    "expected_co2",
+    "window_rationale",
+]
+
+
+_CANDIDATE_REQUIRED_COLUMNS: list[str] = [
+    "predicted_temp_at_start",
+    "expected_kwh",
+    "expected_cost",
+    "expected_co2",
+    "comfort_violation_c",
+    "feasible",
+    "candidate_start_offset_minutes",
+    "active_devices",
+    "active_device_count",
+]
+
+
+def _normalise_active_devices(value: Any) -> tuple[int, ...]:
+    """Convert candidate active-device values into deterministic integer tuples."""
+    if value is None or (isinstance(value, float) and pd.isna(value)):
+        return ()
+    if isinstance(value, str):
+        stripped = value.strip()
+        if not stripped:
+            return ()
+        parts = [part.strip() for part in stripped.split(",")]
+        return tuple(sorted(int(part) for part in parts if part))
+    if isinstance(value, (list, tuple, set)):
+        return tuple(sorted(int(device) for device in value))
+    if isinstance(value, np.ndarray):
+        return tuple(sorted(int(device) for device in value.tolist()))
+    raise ValueError(
+        "active_devices must be a list, tuple, set, numpy array, or comma-separated string."
+    )
+
+
+def _candidate_device_signature(active_devices: tuple[int, ...]) -> str:
+    return ",".join(f"{device:02d}" for device in active_devices)
+
+
+def _normalise_candidate_table(candidates: list[dict[str, Any]] | pd.DataFrame) -> pd.DataFrame:
+    """Return a candidate table with the canonical columns used by schedule selection."""
+    candidate_df = (
+        candidates.copy() if isinstance(candidates, pd.DataFrame) else pd.DataFrame(candidates)
+    )
+    if candidate_df.empty:
+        raise ValueError("candidate table is empty; no schedules can be selected.")
+
+    rename_map = {
+        "is_feasible": "feasible",
+        "violation_celsius": "comfort_violation_c",
+        "offset_minutes": "candidate_start_offset_minutes",
+    }
+    for old_name, new_name in rename_map.items():
+        if new_name not in candidate_df.columns and old_name in candidate_df.columns:
+            candidate_df[new_name] = candidate_df[old_name]
+
+    missing = [col for col in _CANDIDATE_REQUIRED_COLUMNS if col not in candidate_df.columns]
+    if missing:
+        raise ValueError(f"candidate table missing required columns: {missing}")
+
+    candidate_df = candidate_df.copy()
+    candidate_df["active_devices"] = candidate_df["active_devices"].map(_normalise_active_devices)
+    candidate_df["active_device_count"] = candidate_df["active_device_count"].astype(int)
+    candidate_df["candidate_start_offset_minutes"] = candidate_df[
+        "candidate_start_offset_minutes"
+    ].astype(int)
+    for col in [
+        "predicted_temp_at_start",
+        "expected_kwh",
+        "expected_cost",
+        "expected_co2",
+        "comfort_violation_c",
+    ]:
+        candidate_df[col] = candidate_df[col].astype(float)
+    candidate_df["feasible"] = candidate_df["feasible"].astype(bool)
+    candidate_df["_feasible_rank"] = np.where(candidate_df["feasible"], 0, 1)
+    candidate_df["_device_signature"] = candidate_df["active_devices"].map(
+        _candidate_device_signature
+    )
+    return candidate_df
+
+
+def select_best_event_candidate(
+    candidates: list[dict[str, Any]] | pd.DataFrame,
+    top_candidate_count: int = 5,
+) -> tuple[dict[str, Any], pd.DataFrame]:
+    """
+    Select the best optimizer candidate and return compact ranked diagnostics.
+
+    Ordering is deterministic and notebook-visible: feasible candidates win first; if no
+    feasible candidate exists, the smallest comfort violation wins. Ties then sort by
+    expected cost, energy, CO2, latest start time (smallest pre-start offset), and simpler
+    device choices.
+    """
+    if top_candidate_count <= 0:
+        raise ValueError("top_candidate_count must be positive.")
+
+    candidate_df = _normalise_candidate_table(candidates)
+    ranked = candidate_df.sort_values(
+        by=[
+            "_feasible_rank",
+            "comfort_violation_c",
+            "expected_cost",
+            "expected_kwh",
+            "expected_co2",
+            "candidate_start_offset_minutes",
+            "active_device_count",
+            "_device_signature",
+        ],
+        kind="mergesort",
+    ).reset_index(drop=True)
+    ranked["candidate_rank"] = ranked.index + 1
+
+    selected = cast(dict[str, Any], ranked.iloc[0].to_dict())
+    if selected["feasible"]:
+        selection_reason = "feasible lowest-cost schedule selected by deterministic tie-breaks"
+    else:
+        selection_reason = "infeasible fallback with smallest comfort violation selected"
+    selected["selection_reason"] = selection_reason
+
+    diagnostics = ranked.head(top_candidate_count).copy()
+    diagnostics["selected"] = diagnostics["candidate_rank"] == 1
+    diagnostics["selection_reason"] = np.where(
+        diagnostics["selected"], selection_reason, "top candidate for comparison"
+    )
+    diagnostics["active_devices"] = diagnostics["active_devices"].map(
+        lambda devices: ",".join(str(device) for device in devices)
+    )
+    return selected, diagnostics
+
+
+def _schedule_rows_for_window(
+    window: ConsolidatedEventWindow,
+    selected_candidate: dict[str, Any],
+    mode: str,
+    target_temp: float,
+    expected_devices: int,
+) -> list[dict[str, Any]]:
+    active_devices = set(_normalise_active_devices(selected_candidate["active_devices"]))
+    start_time = pd.Timestamp(window.starts_at) - pd.Timedelta(
+        minutes=int(selected_candidate["candidate_start_offset_minutes"])
+    )
+
+    device_on = {i: int(i in active_devices) for i in range(1, EXPECTED_SCHEDULE_DEVICES + 1)}
+    rows: list[dict[str, Any]] = []
+    for event_id in window.original_event_ids:
+        row = ScheduleRow(
+            event_id=str(event_id),
+            mode=mode,
+            start_time=start_time.to_pydatetime(),
+            device_1_on=device_on[1],
+            device_2_on=device_on[2],
+            device_3_on=device_on[3],
+            device_4_on=device_on[4],
+            target_temp=float(target_temp),
+            predicted_temp_at_start=float(selected_candidate["predicted_temp_at_start"]),
+            expected_kwh=float(selected_candidate["expected_kwh"]),
+            expected_cost=float(selected_candidate["expected_cost"]),
+            expected_co2=float(selected_candidate["expected_co2"]),
+            is_feasible=bool(selected_candidate["feasible"]),
+            violation_celsius=float(selected_candidate["comfort_violation_c"]),
+            selection_reason=str(selected_candidate["selection_reason"]),
+            feasible=bool(selected_candidate["feasible"]),
+            comfort_violation_c=float(selected_candidate["comfort_violation_c"]),
+            candidate_start_offset_minutes=int(
+                selected_candidate["candidate_start_offset_minutes"]
+            ),
+            active_device_count=int(selected_candidate["active_device_count"]),
+        )
+        row_dict = asdict(row)
+        row_dict["window_id"] = window.window_id
+        row_dict["window_starts_at"] = pd.Timestamp(window.starts_at)
+        row_dict["window_ends_at"] = pd.Timestamp(window.ends_at)
+        row_dict["window_rationale"] = window.rationale
+        rows.append(row_dict)
+    return rows
+
+
+def optimize_event_control_schedules(
+    df: pd.DataFrame,
+    events_df: pd.DataFrame,
+    thermal_model_dict: dict[str, Any],
+    device_power_model_dict: dict[str, Any],
+    config: EventControlConfig,
+    candidate_offsets: list[int] | None = None,
+    max_simultaneous_devices: int = 4,
+    electricity_price: float = 0.15,
+    co2_factor: float = 0.4,
+    expected_devices: int = 4,
+    merge_threshold_minutes: float = 60.0,
+    top_candidate_count: int = 5,
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """
+    Optimize selected control schedules for consolidated validation events.
+
+    Returns:
+        (schedule_df, diagnostics_df), where schedule_df is expanded back to one row
+        per original event and diagnostics_df contains compact ranked candidate views.
+    """
+    config.validate()
+    if expected_devices != EXPECTED_SCHEDULE_DEVICES:
+        raise ValueError("schedule formatting currently requires expected_devices=4.")
+    if max_simultaneous_devices < 0 or max_simultaneous_devices > expected_devices:
+        raise ValueError("max_simultaneous_devices must be between 0 and expected_devices.")
+
+    if candidate_offsets is None:
+        max_offset = int(config.precondition_hours * 60)
+        candidate_offsets = list(range(0, max_offset + 1, 15))
+    if not candidate_offsets:
+        raise ValueError("candidate_offsets must contain at least one offset.")
+    if any(offset < 0 or offset % 15 != 0 for offset in candidate_offsets):
+        raise ValueError("candidate_offsets must be non-negative multiples of 15 minutes.")
+
+    windows = consolidate_event_windows(events_df, merge_threshold_minutes=merge_threshold_minutes)
+    if not windows:
+        return pd.DataFrame(columns=SCHEDULE_OUTPUT_COLUMNS), pd.DataFrame(
+            columns=CANDIDATE_DIAGNOSTIC_COLUMNS
+        )
+
+    target_temp = config.min_temp if config.mode == "heating" else config.max_temp
+    schedule_rows: list[dict[str, Any]] = []
+    diagnostic_rows: list[pd.DataFrame] = []
+
+    for window in windows:
+        candidates = simulate_all_candidates(
+            df=df,
+            thermal_model_dict=thermal_model_dict,
+            device_power_model_dict=device_power_model_dict,
+            starts_at=window.starts_at,
+            ends_at=window.ends_at,
+            candidate_offsets=candidate_offsets,
+            max_simultaneous_devices=max_simultaneous_devices,
+            electricity_price=electricity_price,
+            co2_factor=co2_factor,
+            comfort_min=config.min_temp,
+            comfort_max=config.max_temp,
+            expected_devices=expected_devices,
+        )
+        selected, diagnostics = select_best_event_candidate(
+            candidates, top_candidate_count=top_candidate_count
+        )
+        schedule_rows.extend(
+            _schedule_rows_for_window(window, selected, config.mode, target_temp, expected_devices)
+        )
+
+        diagnostics = diagnostics.copy()
+        diagnostics["window_id"] = window.window_id
+        diagnostics["window_rationale"] = window.rationale
+        diagnostics["original_event_ids"] = ",".join(window.original_event_ids)
+        diagnostic_rows.append(diagnostics)
+
+    schedule_df = pd.DataFrame(schedule_rows)
+    schedule_order = SCHEDULE_OUTPUT_COLUMNS + [
+        col for col in schedule_df.columns if col not in SCHEDULE_OUTPUT_COLUMNS
+    ]
+    schedule_df = schedule_df[schedule_order]
+
+    diagnostics_df = (
+        pd.concat(diagnostic_rows, ignore_index=True) if diagnostic_rows else pd.DataFrame()
+    )
+    diagnostic_order = CANDIDATE_DIAGNOSTIC_COLUMNS + [
+        col
+        for col in diagnostics_df.columns
+        if col not in CANDIDATE_DIAGNOSTIC_COLUMNS and not col.startswith("_")
+    ]
+    diagnostics_df = diagnostics_df[diagnostic_order]
+    return schedule_df, diagnostics_df
+
+
+def save_event_control_schedule_report(
+    schedule_df: pd.DataFrame,
+    mode: str,
+    report_name: str | None = None,
+) -> pathlib.Path:
+    """Persist selected event-control schedules to the owned local reports directory."""
+    if mode not in ["heating", "cooling"]:
+        raise ValueError("mode must be 'heating' or 'cooling'.")
+    missing = [col for col in SCHEDULE_OUTPUT_COLUMNS if col not in schedule_df.columns]
+    if missing:
+        raise ValueError(
+            f"schedule_df missing required output columns before persistence: {missing}"
+        )
+
+    if report_name is None:
+        report_name = f"{mode}_selected_schedules.csv"
+    report_path = pathlib.Path(report_name)
+    if report_path.name != report_name:
+        raise ValueError("report_name must be a filename, not a path.")
+
+    output_dir = EVENT_CONTROL_REPORT_DIR.resolve()
+    output_dir.mkdir(parents=True, exist_ok=True)
+    path = output_dir / report_name
+    schedule_df.to_csv(path, index=False)
+    return path

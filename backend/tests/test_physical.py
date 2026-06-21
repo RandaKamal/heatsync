@@ -4,6 +4,7 @@ from typing import cast
 
 import nbformat
 import numpy as np
+import pandas as pd
 import scipy.optimize
 import torch
 from nbconvert.preprocessors import ExecutePreprocessor
@@ -15,11 +16,12 @@ backend_path = os.path.abspath(os.path.dirname(os.path.dirname(__file__)))
 if backend_path not in sys.path:
     sys.path.append(backend_path)
 
-from notebooks.utils import load_processed  # noqa: E402
+from notebooks.utils import build_room_physical_model_frame, load_processed  # noqa: E402
 
 SECONDS_PER_HOUR = 3_600.0
 MAX_ABSOLUTE_TEMPERATURE = 1_000.0
 UNSTABLE_OBJECTIVE_PENALTY = 1e12
+RESIDUAL_EPOCHS = 250
 
 
 def simulate_2r2c(
@@ -64,111 +66,43 @@ def simulate_2r2c(
     return T_pred
 
 
-class PINN(nn.Module):
-    """
-    Multi-Layer Perceptron representing the Physics-Informed Neural Network.
-    Predicts indoor temperature from normalized time, outdoor temperature, and power draw.
-    """
+class ResidualCorrector(nn.Module):
+    """Feed-forward residual corrector trained on the calibrated 2R2C residual."""
 
-    def __init__(self, input_dim: int = 3, hidden_dim: int = 32, output_dim: int = 1) -> None:
+    def __init__(self, input_dim: int, hidden_dim: int = 32) -> None:
         super().__init__()
         self.net = nn.Sequential(
             nn.Linear(input_dim, hidden_dim),
-            nn.Tanh(),
-            nn.Linear(hidden_dim, hidden_dim),
-            nn.Tanh(),
-            nn.Linear(hidden_dim, hidden_dim),
-            nn.Tanh(),
-            nn.Linear(hidden_dim, output_dim),
+            nn.ReLU(),
+            nn.Linear(hidden_dim, hidden_dim // 2),
+            nn.ReLU(),
+            nn.Linear(hidden_dim // 2, 1),
         )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         return cast(torch.Tensor, self.net(x))
 
 
-def _prepare_pinn_data() -> tuple[
-    torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, float, np.ndarray
-]:
-    """Helper to load and scale data for PINN convergence test."""
+def _prepare_room_model_data() -> tuple[pd.DataFrame, np.ndarray, np.ndarray, np.ndarray, float]:
+    """Helper to prepare room-level physical inputs for calibration and residual tests."""
     df = load_processed("heating")
-    device_id = df["device_id"].dropna().unique()[0]
-    dev_df = df[df["device_id"] == device_id].copy()
-
-    physical_cols = [
-        "status_temperature_in_celsius",
-        "outside_temperature",
-        "power_draw_kw",
-    ]
-    model_df = (
-        dev_df[physical_cols]
-        .rename(
-            columns={
-                "status_temperature_in_celsius": "T_in",
-                "outside_temperature": "T_out",
-                "power_draw_kw": "Q",
-            }
-        )
-        .dropna()
-    )
-
-    model_df = model_df.iloc[:300].copy()
     dt = 900.0
+    model_df = build_room_physical_model_frame(df, dt_seconds=dt).iloc[:300].copy()
 
     T_in = model_df["T_in"].to_numpy(dtype=float)
     T_out = model_df["T_out"].to_numpy(dtype=float)
-    Q = model_df["Q"].to_numpy(dtype=float)
+    Q = model_df["Q_heat_kw"].to_numpy(dtype=float)
 
-    dt_hours = dt / SECONDS_PER_HOUR
-    time_hours = np.arange(len(model_df)) * dt_hours
-    X = np.stack([time_hours, T_out, Q], axis=1)
-
-    scaler = StandardScaler()
-    X_norm = scaler.fit_transform(X)
-
-    X_tensor = torch.tensor(X_norm, dtype=torch.float32)
-    T_in_tensor = torch.tensor(T_in, dtype=torch.float32).unsqueeze(1)
-    T_out_tensor = torch.tensor(T_out, dtype=torch.float32).unsqueeze(1)
-    Q_tensor = torch.tensor(Q, dtype=torch.float32).unsqueeze(1)
-
-    return X_tensor, T_in_tensor, T_out_tensor, Q_tensor, dt_hours, T_in
+    return model_df, T_in, T_out, Q, dt
 
 
-def test_2r2c_calibration_positive_params() -> None:
-    """
-    Verifies that we can load preprocessed heating data, prepare a single device's
-    time series, run bounded L-BFGS-B optimization, and retrieve positive parameters.
-    """
-    df = load_processed("heating")
-    assert not df.empty
-
-    device_id = df["device_id"].dropna().unique()[0]
-    dev_df = df[df["device_id"] == device_id].copy()
-
-    physical_cols = [
-        "status_temperature_in_celsius",
-        "outside_temperature",
-        "power_draw_kw",
-    ]
-    model_df = (
-        dev_df[physical_cols]
-        .rename(
-            columns={
-                "status_temperature_in_celsius": "T_in",
-                "outside_temperature": "T_out",
-                "power_draw_kw": "Q",
-            }
-        )
-        .dropna()
-    )
-
-    # Use first 300 rows like the notebook
-    model_df = model_df.iloc[:300].copy()
-    dt = 900.0
-
-    T_in = model_df["T_in"].to_numpy(dtype=float)
-    T_out = model_df["T_out"].to_numpy(dtype=float)
-    Q = model_df["Q"].to_numpy(dtype=float)
-
+def _fit_room_2r2c(
+    T_in: np.ndarray,
+    T_out: np.ndarray,
+    Q: np.ndarray,
+    dt: float,
+) -> tuple[np.ndarray, np.ndarray, float]:
+    """Calibrate the room-level 2R2C model and return parameters, fit, and objective."""
     T_wall_init = (T_in[0] + T_out[0]) / 2
     bounds = [(0.001, 50.0)] * 4
 
@@ -180,7 +114,6 @@ def test_2r2c_calibration_positive_params() -> None:
 
     np.random.seed(42)
     restart_results = []
-    # Run bounded L-BFGS-B optimization with 3 random restarts
     for _ in range(3):
         x0 = np.random.uniform(0.1, 25.0, size=4)
         result = scipy.optimize.minimize(
@@ -188,87 +121,147 @@ def test_2r2c_calibration_positive_params() -> None:
             x0=x0,
             method="L-BFGS-B",
             bounds=bounds,
-            options={"maxiter": 100, "ftol": 1e-6},  # lower maxiter for test speed
+            options={"maxiter": 100, "ftol": 1e-6},
         )
         restart_results.append(result)
 
     best_result = min(restart_results, key=lambda res: res.fun)
     best_params = best_result.x
+    T_fit = simulate_2r2c(best_params, T_in[0], T_wall_init, T_out, Q, dt)
+    return best_params, T_fit, float(best_result.fun)
+
+
+def _build_residual_features(
+    model_df: pd.DataFrame,
+    T_fit: np.ndarray,
+    residual: np.ndarray,
+) -> np.ndarray:
+    """Build stateful and electrical-energy residual-correction features."""
+    feature_df = model_df.copy()
+    feature_df["T_2r2c"] = T_fit
+    feature_df["previous_T_in"] = feature_df["T_in"].shift(1).fillna(feature_df["T_in"].iloc[0])
+    feature_df["previous_residual"] = (
+        pd.Series(residual, index=feature_df.index).shift(1).fillna(0.0)
+    )
+    feature_df["delta_T_out_in"] = feature_df["T_out"] - feature_df["T_2r2c"]
+    feature_df["hour_sin"] = np.sin(2 * np.pi * feature_df["hour_of_day"] / 24.0)
+    feature_df["hour_cos"] = np.cos(2 * np.pi * feature_df["hour_of_day"] / 24.0)
+
+    feature_cols = [
+        "T_2r2c",
+        "previous_T_in",
+        "previous_residual",
+        "delta_T_out_in",
+        "T_out",
+        "Q_electric_kw",
+        "electricity_kwh",
+        "cumulative_electricity_kwh",
+        "target_temp",
+        "occupancy_flag",
+        "is_heating_required",
+        "status_is_compressor_active",
+        "hour_sin",
+        "hour_cos",
+    ]
+    assert {"Q_electric_kw", "electricity_kwh", "cumulative_electricity_kwh"} <= set(feature_cols)
+    return feature_df[feature_cols].to_numpy(dtype=float)
+
+
+def _train_residual_corrector(
+    X: np.ndarray,
+    residual: np.ndarray,
+) -> tuple[np.ndarray, float | None, float | None]:
+    """Train the residual corrector and return denormalized residual predictions."""
+    scaler = StandardScaler()
+    X_norm = scaler.fit_transform(X)
+
+    y_mean = float(residual.mean())
+    y_std = float(residual.std())
+    if y_std == 0.0:
+        y_std = 1.0
+    y_norm = (residual - y_mean) / y_std
+
+    X_tensor = torch.tensor(X_norm, dtype=torch.float32)
+    y_tensor = torch.tensor(y_norm, dtype=torch.float32).unsqueeze(1)
+
+    torch.manual_seed(42)
+    np.random.seed(42)
+
+    residual_model = ResidualCorrector(input_dim=X_tensor.shape[1], hidden_dim=32)
+    optimizer = torch.optim.Adam(residual_model.parameters(), lr=1e-3)
+    criterion = nn.MSELoss()
+
+    initial_loss = None
+    final_loss = None
+    for epoch in range(RESIDUAL_EPOCHS):
+        optimizer.zero_grad()
+        pred = residual_model(X_tensor)
+        loss = criterion(pred, y_tensor)
+        loss.backward()
+        optimizer.step()
+
+        if epoch == 0:
+            initial_loss = loss.item()
+        if epoch == RESIDUAL_EPOCHS - 1:
+            final_loss = loss.item()
+
+    residual_model.eval()
+    with torch.no_grad():
+        residual_correction = (residual_model(X_tensor).numpy().flatten() * y_std) + y_mean
+
+    return residual_correction, initial_loss, final_loss
+
+
+def test_2r2c_calibration_positive_params() -> None:
+    """
+    Verifies that we can load preprocessed heating data, prepare a room-level
+    time series, run bounded L-BFGS-B optimization, and retrieve positive parameters.
+    """
+    model_df, T_in, T_out, Q, dt = _prepare_room_model_data()
+    assert not model_df.empty
+    assert (model_df["device_count"] >= 1).all()
+    assert np.all(model_df["Q_electric_kw"].to_numpy(dtype=float) <= Q)
+
+    best_params, T_fit, objective_value = _fit_room_2r2c(T_in, T_out, Q, dt)
 
     # Assert optimizer converges (at least to a reasonable threshold)
-    assert best_result.fun < UNSTABLE_OBJECTIVE_PENALTY
+    assert objective_value < UNSTABLE_OBJECTIVE_PENALTY
 
     # Assert all 4 parameters (R_in, C_in, R_out, C_wall) are > 0
     assert (best_params > 0).all()
 
     # Assert RMSE of fitted vs observed is finite and positive
-    T_fit = simulate_2r2c(best_params, T_in[0], T_wall_init, T_out, Q, dt)
     assert np.all(np.isfinite(T_fit))
     rmse = float(np.sqrt(np.mean((T_fit - T_in) ** 2)))
     assert np.isfinite(rmse)
     assert rmse > 0.0
 
 
-def test_pinn_convergence() -> None:
+def test_residual_corrector_improves_room_level_2r2c_fit() -> None:
     """
-    Verifies PyTorch PINN model training convergence with composite data MSE + physics loss.
+    Verifies the revised physical-first architecture:
+    room-level 2R2C baseline first, then a neural residual corrector that includes
+    stateful and electrical-energy features.
     """
-    X_tensor, T_in_tensor, T_out_tensor, Q_tensor, dt_hours, T_in = _prepare_pinn_data()
+    model_df, T_in, T_out, Q, dt = _prepare_room_model_data()
+    _, T_fit, _ = _fit_room_2r2c(T_in, T_out, Q, dt)
+    residual = T_in - T_fit
 
-    # Fixed parameters for PINN derived from expected physics calibration
-    # to avoid nested optimization in this test.
-    R_in_cal, C_in_cal, _R_out_cal, _C_wall_cal = 10.0, 5.0, 10.0, 15.0
-    alpha = 1.0 / (R_in_cal * C_in_cal)
-    beta = 1.0 / C_in_cal
-
-    torch.manual_seed(42)
-    np.random.seed(42)
-
-    pinn_model = PINN(input_dim=3, hidden_dim=32, output_dim=1)
-    optimizer = torch.optim.Adam(pinn_model.parameters(), lr=1e-3)
-    epochs = 100
-    lambda_phys = 0.1
-
-    initial_loss = None
-    final_loss = None
-
-    for epoch in range(epochs):
-        optimizer.zero_grad()
-        T_pred = pinn_model(X_tensor)
-
-        # 1. Data Loss
-        data_loss = torch.mean((T_pred - T_in_tensor) ** 2)
-
-        # 2. Physics Loss
-        dT_pred_dt = (T_pred[1:] - T_pred[:-1]) / dt_hours
-        T_pred_k = T_pred[:-1]
-        T_out_k = T_out_tensor[:-1]
-        Q_k = Q_tensor[:-1]
-
-        residual = dT_pred_dt - (alpha * (T_out_k - T_pred_k) + beta * Q_k)
-        physics_loss = torch.mean(residual**2)
-
-        total_loss = data_loss + lambda_phys * physics_loss
-        total_loss.backward()
-        optimizer.step()
-
-        if epoch == 0:
-            initial_loss = total_loss.item()
-        if epoch == epochs - 1:
-            final_loss = total_loss.item()
+    X = _build_residual_features(model_df, T_fit, residual)
+    residual_correction, initial_loss, final_loss = _train_residual_corrector(X, residual)
 
     assert initial_loss is not None
     assert final_loss is not None
     assert np.isfinite(final_loss)
-    # Assert training improves (loss decreases)
     assert final_loss < initial_loss
 
-    # Assert predictions have same length and are finite
-    pinn_model.eval()
-    with torch.no_grad():
-        T_pred_eval = pinn_model(X_tensor).numpy()
-    assert len(T_pred_eval) == len(T_in)
-    assert np.all(np.isfinite(T_pred_eval))
+    corrected = T_fit + residual_correction
+    baseline_rmse = float(np.sqrt(np.mean((T_fit - T_in) ** 2)))
+    corrected_rmse = float(np.sqrt(np.mean((corrected - T_in) ** 2)))
+
+    assert len(corrected) == len(T_in)
+    assert np.all(np.isfinite(corrected))
+    assert corrected_rmse < baseline_rmse
 
 
 def test_notebook_execution() -> None:

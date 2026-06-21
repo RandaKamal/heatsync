@@ -78,7 +78,7 @@ repos:
         entry: >-
           bash -c 'mapfile -t test_files < <(git ls-files "backend/test_*.py" "backend/*_test.py" "backend/**/test_*.py" "backend/**/*_test.py" | sort -u);
           if [ "${#test_files[@]}" -eq 0 ]; then echo "No backend tests found; skipping pytest."; exit 0; fi;
-          uv run --project backend pytest "${test_files[@]}" -q'
+          PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 uv run --project backend pytest -c backend/pyproject.toml "${test_files[@]}" -q'
         language: system
         stages: [manual]
         pass_filenames: false

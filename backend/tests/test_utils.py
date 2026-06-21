@@ -1,22 +1,51 @@
 import pathlib
 from collections.abc import Callable
+from datetime import datetime
 
+import notebooks.utils as notebook_utils
+import numpy as np
 import pandas as pd
 import pytest
 from notebooks.utils import (
+    SCHEDULE_OUTPUT_COLUMNS,
+    ConsolidatedEventWindow,
+    EventControlConfig,
     align_to_15min,
     build_aligned_dataset,
+    build_device_level_features,
+    build_event_features,
+    build_room_level_features,
+    build_room_physical_model_frame,
+    check_coefficient_plausibility,
+    consolidate_event_windows,
+    discover_device_columns,
+    extract_events_from_frame,
+    generate_device_subsets,
+    get_device_id_mapping,
+    get_historical_value,
     load_intervals,
+    load_model_artifacts,
     load_power_draw,
     load_processed,
     load_snapshots,
     load_space_events,
+    predict_device_power,
+    predict_temperature,
+    save_event_control_schedule_report,
+    save_model_artifacts,
     save_processed,
+    select_best_event_candidate,
+    simulate_all_candidates,
+    simulate_preconditioning,
+    train_device_power_model,
+    train_thermal_model,
     validate_columns,
+    validate_optimizer_inputs,
 )
 
 EXPECTED_ALIGNED_ROWS_WITH_LONG_GAP = 8
 EXPECTED_SHORT_GAP_FILL_VALUE = 11.0
+EXPECTED_MINUTES_SINCE_PREVIOUS_EVENT = 15.0
 
 
 def test_load_snapshots_heating() -> None:
@@ -254,3 +283,904 @@ def test_window_validation_rejects_unknown_window(loader: Callable[[str], object
 def test_load_processed_raises_for_missing_cache(tmp_path: pathlib.Path) -> None:
     with pytest.raises(FileNotFoundError, match="Processed file not found"):
         load_processed("heating", output_dir=str(tmp_path))
+
+
+def test_build_device_level_features_pivots_power_and_activity() -> None:
+    timestamps = pd.to_datetime(
+        [
+            "2026-03-30 00:00:00",
+            "2026-03-30 00:00:00",
+            "2026-03-30 00:00:00",
+            "2026-03-30 00:15:00",
+            "2026-03-30 00:15:00",
+        ]
+    )
+    df = pd.DataFrame(
+        {
+            "device_id": ["dev_a", "dev_a", "dev_b", "dev_a", "dev_b"],
+            "power_draw_kw": [0.4, 0.6, 0.2, 1.2, 0.3],
+            "was_adjusting_temperature": [0, 1, 0, 0, 1],
+        },
+        index=timestamps,
+    )
+    df.index.name = "timestamp"
+
+    features = build_device_level_features(df, standby_baseline=1.0, expected_devices=2)
+
+    assert list(features.columns) == [
+        "device_1_power_kw",
+        "device_1_active",
+        "device_2_power_kw",
+        "device_2_active",
+    ]
+    assert features.loc["2026-03-30 00:00:00", "device_1_power_kw"] == pytest.approx(0.5)
+    assert features.loc["2026-03-30 00:00:00", "device_1_active"] == 1.0
+    assert features.loc["2026-03-30 00:15:00", "device_1_active"] == 1.0
+    assert features.loc["2026-03-30 00:15:00", "device_2_active"] == 1.0
+
+
+@pytest.mark.parametrize(
+    ("bad_df", "match"),
+    [
+        (pd.DataFrame({"device_id": ["dev_a"]}), "indexed by timestamp"),
+        (
+            pd.DataFrame(
+                {"device_id": ["dev_a"], "power_draw_kw": [0.1]},
+                index=pd.to_datetime(["2026-03-30 00:00:00"]),
+            ),
+            "was_adjusting_temperature",
+        ),
+    ],
+)
+def test_build_device_level_features_rejects_malformed_inputs(
+    bad_df: pd.DataFrame, match: str
+) -> None:
+    with pytest.raises(ValueError, match=match):
+        build_device_level_features(bad_df, standby_baseline=1.0)
+
+
+def test_build_room_level_features_aggregates_device_rows() -> None:
+    timestamps = pd.to_datetime(
+        [
+            "2026-03-30 00:00:00",
+            "2026-03-30 00:00:00",
+            "2026-03-30 00:15:00",
+            "2026-03-30 00:15:00",
+        ]
+    )
+    df = pd.DataFrame(
+        {
+            "status_temperature_in_celsius": [20.0, 22.0, 21.0, 23.0],
+            "status_temperature_return_in_celsius": [19.0, 21.0, 20.0, 22.0],
+            "status_humidity_in_percent": [40.0, 50.0, 45.0, 55.0],
+            "status_carbon_dioxide_in_ppm": [600.0, 800.0, 700.0, 900.0],
+            "power_draw_kw": [1.0, 2.0, 3.0, 4.0],
+            "outside_temperature": [5.0, 6.0, 7.0, 8.0],
+        },
+        index=timestamps,
+    )
+    df.index.name = "timestamp"
+
+    room = build_room_level_features(df)
+
+    assert list(room["room_temp"]) == [21.0, 22.0]
+    assert list(room["room_return_temp"]) == [20.0, 21.0]
+    assert list(room["room_humidity"]) == [45.0, 50.0]
+    assert list(room["room_co2"]) == [700.0, 800.0]
+    assert list(room["room_power_kw"]) == [3.0, 7.0]
+    assert list(room["room_energy_kwh"]) == [0.75, 1.75]
+    assert list(room["outside_temperature"]) == [5.0, 7.0]
+
+
+def test_build_event_features_marks_active_and_preconditioning_windows() -> None:
+    index = pd.date_range("2026-03-30 00:00:00", periods=6, freq="15min")
+    events = pd.DataFrame(
+        {
+            "starts_at": ["2026-03-30 00:30:00"],
+            "ends_at": ["2026-03-30 01:00:00"],
+        }
+    )
+
+    features = build_event_features(index, events, preconditioning_window_hours=0.5)
+
+    assert list(features["event_active"]) == [0, 0, 1, 1, 0, 0]
+    assert list(features["inside_preconditioning_window"]) == [
+        1.0,
+        1.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+    ]
+    assert pd.isna(features.loc[index[-1], "minutes_to_next_event"])
+    assert (
+        features.loc[index[-1], "minutes_since_previous_event"]
+        == EXPECTED_MINUTES_SINCE_PREVIOUS_EVENT
+    )
+
+
+def test_build_event_features_rejects_events_ending_before_start() -> None:
+    index = pd.date_range("2026-03-30 00:00:00", periods=1, freq="15min")
+    events = pd.DataFrame(
+        {
+            "starts_at": ["2026-03-30 01:00:00"],
+            "ends_at": ["2026-03-30 00:00:00"],
+        }
+    )
+
+    with pytest.raises(ValueError, match="ending before they start"):
+        build_event_features(index, events)
+
+
+def test_build_room_physical_model_frame_aggregates_device_power() -> None:
+    timestamps = pd.to_datetime(
+        [
+            "2026-03-30 00:00:00",
+            "2026-03-30 00:00:00",
+            "2026-03-30 00:15:00",
+            "2026-03-30 00:15:00",
+        ]
+    )
+    df = pd.DataFrame(
+        {
+            "device_id": ["dev_1", "dev_2", "dev_1", "dev_2"],
+            "status_temperature_in_celsius": [20.0, 22.0, 21.0, 23.0],
+            "outside_temperature": [5.0, 7.0, 6.0, 8.0],
+            "power_draw_kw": [1.0, 2.0, 3.0, 4.0],
+            "target_temp": [21.0, 21.0, 22.0, 22.0],
+            "occupancy_flag": [0, 1, 0, 0],
+            "is_heating_required": [1, 0, 1, 1],
+            "status_is_compressor_active": [0, 1, 1, 1],
+            "hour_of_day": [0, 0, 0, 0],
+            "is_weekend": [0, 0, 0, 0],
+        },
+        index=timestamps,
+    )
+    df.index.name = "timestamp"
+
+    room_df = build_room_physical_model_frame(df, dt_seconds=900.0, cop=2.0)
+
+    assert list(room_df["device_count"]) == [2, 2]
+    assert list(room_df["T_in"]) == [21.0, 22.0]
+    assert list(room_df["T_out"]) == [6.0, 7.0]
+    assert list(room_df["Q_electric_kw"]) == [3.0, 7.0]
+    assert list(room_df["Q_heat_kw"]) == [6.0, 14.0]
+    assert list(room_df["electricity_kwh"]) == [0.75, 1.75]
+    assert list(room_df["cumulative_electricity_kwh"]) == [0.75, 2.5]
+    assert list(room_df["occupancy_flag"]) == [1, 0]
+
+
+def test_check_coefficient_plausibility() -> None:
+    """
+    Test check_coefficient_plausibility logic.
+    """
+    # Plausible coefficients
+    assert check_coefficient_plausibility(0.9, 0.01, 0.05, 0.0) is True
+    # Implausible 'a'
+    assert check_coefficient_plausibility(-0.1, 0.01, 0.05, 0.0) is False
+    # Implausible 'b' (below threshold)
+    assert check_coefficient_plausibility(0.9, -0.05, 0.05, 0.0, threshold=0.01) is False
+    # Plausible 'b' (above threshold)
+    assert check_coefficient_plausibility(0.9, -0.005, 0.05, 0.0, threshold=0.01) is True
+    # Implausible 'c_heat'
+    assert check_coefficient_plausibility(0.9, 0.01, -0.05, 0.0, threshold=0.01) is False
+    # Implausible 'c_cool'
+    assert check_coefficient_plausibility(0.9, 0.01, 0.0, -0.05, threshold=0.01) is False
+
+
+def test_train_thermal_model_success() -> None:
+    """
+    Test successful thermal model training (heating/cooling) with synthetic plausible data.
+    """
+    idx = pd.date_range("2026-03-30 00:00:00", periods=20, freq="15min")
+    # For heating: T_next ~ 0.95 * room_temp + 0.02 * outside + 0.1 * room_power
+    room_temp = [20.0]
+    outside = [10.0] * 20
+    power = [10.0] * 20
+    for i in range(19):
+        t_next = (
+            0.95 * room_temp[-1] + 0.02 * outside[i] + 0.01 * power[i] + np.random.normal(0, 0.01)
+        )
+        room_temp.append(t_next)
+
+    df = pd.DataFrame(
+        {
+            "room_temp": room_temp,
+            "outside_temperature": outside,
+            "room_power_kw": power,
+            "event_active": [0] * 20,
+        },
+        index=idx,
+    )
+
+    split_ts = pd.Timestamp("2026-03-30 04:00:00")
+    # Heating season
+    model_dict_h = train_thermal_model(df, "heating", split_ts, alpha=0.1)
+    assert model_dict_h["season"] == "heating"
+    assert model_dict_h["is_fallback"] is False
+    assert model_dict_h["a"] > 0
+    assert model_dict_h["b"] >= -1e-2
+    assert model_dict_h["c_heat"] >= -1e-2
+    assert model_dict_h["c_cool"] == 0.0
+
+    # Cooling season with synthetic cooling data
+    # T_next ~ 0.95 * room_temp + 0.02 * outside - 0.01 * cooling_power
+    room_temp_c = [22.0]
+    for i in range(19):
+        t_next = (
+            0.95 * room_temp_c[-1] + 0.02 * outside[i] - 0.01 * power[i] + np.random.normal(0, 0.01)
+        )
+        room_temp_c.append(t_next)
+
+    df_c = pd.DataFrame(
+        {
+            "room_temp": room_temp_c,
+            "outside_temperature": outside,
+            "room_power_kw": power,
+            "event_active": [0] * 20,
+        },
+        index=idx,
+    )
+    model_dict_c = train_thermal_model(df_c, "cooling", split_ts, alpha=0.1)
+    assert model_dict_c["season"] == "cooling"
+    assert model_dict_c["is_fallback"] is False
+    assert model_dict_c["a"] > 0
+    assert model_dict_c["b"] >= -1e-2
+    assert model_dict_c["c_cool"] >= -1e-2
+    assert model_dict_c["c_heat"] == 0.0
+
+
+def test_train_thermal_model_fallback() -> None:
+    """
+    Test that train_thermal_model correctly triggers fallback when coefficients are implausible.
+    """
+    idx = pd.date_range("2026-03-30 00:00:00", periods=20, freq="15min")
+    # Implausible relationship: temperature drops sharply when heating power is very high
+    room_temp = [20.0 - 5.0 * i for i in range(20)]
+    df = pd.DataFrame(
+        {
+            "room_temp": room_temp,
+            "outside_temperature": [10.0] * 20,
+            "room_power_kw": [1.0 * i for i in range(20)],
+            "event_active": [0] * 20,
+        },
+        index=idx,
+    )
+
+    split_ts = pd.Timestamp("2026-03-30 04:00:00")
+    model_dict = train_thermal_model(df, "heating", split_ts)
+    assert model_dict["is_fallback"] is True
+    assert model_dict["fallback_reason"] is not None
+    assert model_dict["features"] == ["room_temp"]
+    assert model_dict["a"] > 0
+    assert model_dict["b"] == 0.0
+    assert model_dict["c_heat"] == 0.0
+    assert model_dict["c_cool"] == 0.0
+
+
+def test_train_thermal_model_errors() -> None:
+    """
+    Test train_thermal_model validation errors.
+    """
+    idx = pd.date_range("2026-03-30 00:00:00", periods=5, freq="15min")
+    df = pd.DataFrame(
+        {
+            "room_temp": [20.0] * 5,
+            "outside_temperature": [10.0] * 5,
+            "room_power_kw": [1.0] * 5,
+            "event_active": [0] * 5,
+        },
+        index=idx,
+    )
+
+    # Invalid season
+    with pytest.raises(ValueError, match="season must be"):
+        train_thermal_model(df, "shoulder", pd.Timestamp("2026-03-30 00:45:00"))
+
+    # Empty training set
+    with pytest.raises(ValueError, match="Training data is empty before"):
+        train_thermal_model(df, "heating", pd.Timestamp("2026-03-30 00:00:00"))
+
+
+def test_predict_temperature() -> None:
+    """
+    Test predict_temperature predictions and error conditions.
+    """
+    idx = pd.date_range("2026-03-30 00:00:00", periods=5, freq="15min")
+    df = pd.DataFrame(
+        {
+            "room_temp": [20.0] * 5,
+            "outside_temperature": [10.0] * 5,
+            "room_power_kw": [1.0] * 5,
+            "event_active": [0] * 5,
+        },
+        index=idx,
+    )
+
+    model_dict = train_thermal_model(df, "heating", pd.Timestamp("2026-03-30 00:45:00"))
+    preds = predict_temperature(model_dict, df)
+    assert len(preds) == 5
+    assert not preds.isna().any()
+
+    # Missing column
+    df_missing = df.drop(columns=["room_temp"])
+    with pytest.raises(ValueError, match="Required features"):
+        predict_temperature(model_dict, df_missing)
+
+
+def test_device_power_model() -> None:
+    """
+    Test training and predicting with the device power model.
+    """
+    idx = pd.date_range("2026-03-30 00:00:00", periods=6, freq="15min")
+    df = pd.DataFrame(
+        {
+            "device_1_power_kw": [10.0, 12.0, 0.05, 11.0, 0.05, 0.05],
+            "device_1_active": [1.0, 1.0, 0.0, 1.0, 0.0, 0.0],
+            "device_2_power_kw": [3.0, 3.5, 0.02, 3.2, 0.02, 0.02],
+            "device_2_active": [1.0, 1.0, 0.0, 1.0, 0.0, 0.0],
+        },
+        index=idx,
+    )
+    df.index.name = "timestamp"
+
+    # Train on first 4 steps (before 01:00:00)
+    split_ts = pd.Timestamp("2026-03-30 01:00:00")
+    model_dict = train_device_power_model(df, "heating", split_ts, expected_devices=2)
+
+    assert model_dict["season"] == "heating"
+    assert model_dict["expected_devices"] == 2
+
+    params = model_dict["device_params"]
+    # For device 1 active: mean of [10.0, 12.0] = 11.0
+    # For device 1 standby: mean of [0.05] = 0.05
+    assert params["device_1"]["active_power"] == pytest.approx(11.0)
+    assert params["device_1"]["standby_power"] == pytest.approx(0.05)
+
+    # For device 2 active: mean of [3.0, 3.5, 3.2] = 3.233333
+    # For device 2 standby: mean of [0.02] = 0.02
+    assert params["device_2"]["active_power"] == pytest.approx(3.233333)
+    assert params["device_2"]["standby_power"] == pytest.approx(0.02)
+
+    # Predict on the whole df
+    preds_df = predict_device_power(model_dict, df)
+    assert "device_1_predicted_power_kw" in preds_df.columns
+    assert "device_2_predicted_power_kw" in preds_df.columns
+
+    # Verify prediction for step 4 (index 3), which is active (1.0)
+    # Expected device 1 power: 11.0
+    assert preds_df.loc[idx[3], "device_1_predicted_power_kw"] == pytest.approx(11.0)
+    # Verify prediction for step 5 (index 4), which is standby (0.0)
+    # Expected device 1 power: 0.05
+    assert preds_df.loc[idx[4], "device_1_predicted_power_kw"] == pytest.approx(0.05)
+
+
+def test_model_artifacts_save_and_reload(tmp_path: pathlib.Path) -> None:
+    """
+    Test save_model_artifacts and load_model_artifacts functionality.
+    """
+    idx = pd.date_range("2026-03-30 00:00:00", periods=5, freq="15min")
+    df = pd.DataFrame(
+        {
+            "room_temp": [20.0] * 5,
+            "outside_temperature": [10.0] * 5,
+            "room_power_kw": [1.0] * 5,
+            "event_active": [0] * 5,
+        },
+        index=idx,
+    )
+    thermal_dict = train_thermal_model(df, "heating", pd.Timestamp("2026-03-30 00:45:00"))
+
+    power_df = pd.DataFrame(
+        {
+            "device_1_power_kw": [10.0, 0.05],
+            "device_1_active": [1.0, 0.0],
+        },
+        index=idx[:2],
+    )
+    power_df.index.name = "timestamp"
+    power_dict = train_device_power_model(
+        power_df, "heating", pd.Timestamp("2026-03-30 00:15:00"), expected_devices=1
+    )
+
+    save_model_artifacts(
+        artifacts_dir=tmp_path,
+        thermal_model_dict=thermal_dict,
+        device_power_model_dict=power_dict,
+        metrics={"mae": 0.1, "rmse": 0.2},
+        train_timestamps={"start": "2026-03-30T00:00:00", "end": "2026-03-30T00:30:00"},
+    )
+
+    # Assert files exist in standard format and prefixed format
+    assert (tmp_path / "thermal_model.joblib").exists()
+    assert (tmp_path / "scaler.joblib").exists()
+    assert (tmp_path / "feature_columns.json").exists()
+    assert (tmp_path / "model_metadata.json").exists()
+    assert (tmp_path / "device_power_model.joblib").exists()
+
+    assert (tmp_path / "heating_thermal_model.joblib").exists()
+    assert (tmp_path / "heating_scaler.joblib").exists()
+    assert (tmp_path / "heating_feature_columns.json").exists()
+    assert (tmp_path / "heating_model_metadata.json").exists()
+    assert (tmp_path / "heating_device_power_model.joblib").exists()
+
+    # Load with general season parameter
+    loaded_thermal, loaded_power = load_model_artifacts(tmp_path, season="heating")
+
+    assert loaded_thermal["season"] == "heating"
+    assert loaded_thermal["is_fallback"] == thermal_dict["is_fallback"]
+    assert loaded_thermal["features"] == thermal_dict["features"]
+    assert loaded_power["season"] == "heating"
+    assert (
+        loaded_power["device_params"]["device_1"]["active_power"]
+        == power_dict["device_params"]["device_1"]["active_power"]
+    )
+
+
+def test_optimizer_contracts_and_inputs() -> None:
+    # Valid config
+    config = EventControlConfig(
+        mode="heating", min_temp=18.0, max_temp=22.0, precondition_hours=2.0
+    )
+    config.validate()
+
+    # Invalid mode
+    with pytest.raises(ValueError, match="Invalid mode"):
+        validate_optimizer_inputs(mode="invalid_mode", min_temp=18.0, max_temp=22.0)
+
+    # Invalid comfort band
+    with pytest.raises(ValueError, match="Invalid comfort band"):
+        validate_optimizer_inputs(mode="heating", min_temp=22.0, max_temp=18.0)
+
+    # Negative precondition hours
+    with pytest.raises(ValueError, match="precondition_hours must be non-negative"):
+        validate_optimizer_inputs(
+            mode="heating", min_temp=18.0, max_temp=22.0, precondition_hours=-1.0
+        )
+
+
+def test_device_discovery_and_ordering() -> None:
+    # Test device mapping ordering
+    df_devices = pd.DataFrame(
+        {
+            "device_id": [
+                "unknown-device-id",
+                "1c893f75-4599-4402-9d4c-1017aa858fa8",  # Second in KNOWN_DEVICE_ORDER
+                "bdaf0e14-2cd1-43c8-b9ea-b3c90309f773",  # First in KNOWN_DEVICE_ORDER
+            ]
+        }
+    )
+
+    mapping = get_device_id_mapping(df_devices, expected_devices=4)
+    # Expected ordering: KNOWN ones first, then unknowns
+    # First: bdaf0e14-2cd1-43c8-b9ea-b3c90309f773
+    # Second: 1c893f75-4599-4402-9d4c-1017aa858fa8
+    # Third: unknown-device-id
+    # Fourth: e72fea56-abe7-4d3f-a0ed-1e6b6c462157 (from KNOWN_DEVICE_ORDER because we need 4)
+    assert mapping["bdaf0e14-2cd1-43c8-b9ea-b3c90309f773"] == 1
+    assert mapping["1c893f75-4599-4402-9d4c-1017aa858fa8"] == 2
+    assert mapping["unknown-device-id"] == 3
+    assert mapping["e72fea56-abe7-4d3f-a0ed-1e6b6c462157"] == 4
+
+    # Test discover_device_columns
+    df_wide = pd.DataFrame(
+        {
+            "device_1_power_kw": [1.0, 2.0],
+            "device_1_active": [1.0, 0.0],
+            "device_2_power_kw": [0.5, 0.5],
+            "device_2_active": [0.0, 0.0],
+            # device 3 power is missing active, device 4 is completely missing
+            "device_3_power_kw": [1.5, 1.5],
+        }
+    )
+    cols_map = discover_device_columns(df_wide, expected_devices=4)
+    assert "device_1" in cols_map
+    assert cols_map["device_1"]["power"] == "device_1_power_kw"
+    assert cols_map["device_1"]["active"] == "device_1_active"
+    assert "device_2" in cols_map
+    assert "device_3" not in cols_map
+    assert "device_4" not in cols_map
+
+
+def test_extract_events_from_frame() -> None:
+    # Test typical extraction with index
+    times = pd.date_range("2026-03-30 00:00:00", periods=8, freq="15min")
+    df = pd.DataFrame({"occupancy_flag": [0, 1, 1, 0, 0, 1, 0, 0]}, index=times)
+
+    events = extract_events_from_frame(df, flag_col="occupancy_flag")
+    assert len(events) == 2
+    # First event: index 1 and 2 (00:15 and 00:30) -> start: 00:15, end: 00:30 + 15m = 00:45
+    assert events.iloc[0]["starts_at"] == pd.Timestamp("2026-03-30 00:15:00")
+    assert events.iloc[0]["ends_at"] == pd.Timestamp("2026-03-30 00:45:00")
+    # Second event: index 5 (01:15) -> start: 01:15, end: 01:30
+    assert events.iloc[1]["starts_at"] == pd.Timestamp("2026-03-30 01:15:00")
+    assert events.iloc[1]["ends_at"] == pd.Timestamp("2026-03-30 01:30:00")
+
+    # Missing flag column raises ValueError
+    with pytest.raises(ValueError, match="not found in DataFrame"):
+        extract_events_from_frame(df, flag_col="non_existent")
+
+    # Non-datetime index without timestamp column raises ValueError
+    df_no_dt = pd.DataFrame({"occupancy_flag": [1]}, index=[0])
+    with pytest.raises(ValueError, match="must be a DatetimeIndex or contain a 'timestamp' column"):
+        extract_events_from_frame(df_no_dt)
+
+
+def test_consolidate_event_windows() -> None:
+    # Create test events
+    events_df = pd.DataFrame(
+        [
+            # Duplicate events
+            {
+                "event_id": "E1",
+                "starts_at": "2026-03-30 08:00:00",
+                "ends_at": "2026-03-30 09:00:00",
+            },
+            {
+                "event_id": "E2",
+                "starts_at": "2026-03-30 08:00:00",
+                "ends_at": "2026-03-30 09:00:00",
+            },
+            # Overlapping event
+            {
+                "event_id": "E3",
+                "starts_at": "2026-03-30 08:30:00",
+                "ends_at": "2026-03-30 10:00:00",
+            },
+            # Close back-to-back (gap = 30 minutes <= 60 minutes)
+            {
+                "event_id": "E4",
+                "starts_at": "2026-03-30 10:30:00",
+                "ends_at": "2026-03-30 11:30:00",
+            },
+            # Separated event (gap = 90 minutes > 60 minutes)
+            {
+                "event_id": "E5",
+                "starts_at": "2026-03-30 13:00:00",
+                "ends_at": "2026-03-30 14:00:00",
+            },
+        ]
+    )
+
+    # Consolidate with 60 minutes threshold
+    consolidated = consolidate_event_windows(events_df, merge_threshold_minutes=60.0)
+
+    assert len(consolidated) == 2
+
+    # First consolidated window: E1, E2, E3, E4 merged
+    # Starts at 08:00:00, ends at 11:30:00
+    w1 = consolidated[0]
+    assert isinstance(w1, ConsolidatedEventWindow)
+    assert w1.window_id == "W01"
+    assert w1.starts_at == pd.Timestamp("2026-03-30 08:00:00")
+    assert w1.ends_at == pd.Timestamp("2026-03-30 11:30:00")
+    assert w1.original_event_ids == ["E1", "E2", "E3", "E4"]
+    assert "Merged 4 events" in w1.rationale
+
+    # Second consolidated window: E5
+    w2 = consolidated[1]
+    assert w2.window_id == "W02"
+    assert w2.starts_at == pd.Timestamp("2026-03-30 13:00:00")
+    assert w2.ends_at == pd.Timestamp("2026-03-30 14:00:00")
+    assert w2.original_event_ids == ["E5"]
+    assert "single event" in w2.rationale
+
+    # Negative merge threshold raises ValueError
+    with pytest.raises(ValueError, match="merge_threshold_minutes must be non-negative"):
+        consolidate_event_windows(events_df, merge_threshold_minutes=-10.0)
+
+    # Missing columns raises ValueError
+    df_bad = pd.DataFrame({"starts_at": ["2026-03-30 08:00:00"]})
+    with pytest.raises(ValueError, match="Missing required column"):
+        consolidate_event_windows(df_bad)
+
+
+def test_event_candidate_simulation() -> None:
+    # 1. Test generate_device_subsets
+    subsets = generate_device_subsets(expected_devices=4, max_simultaneous_devices=2)
+    assert len(subsets) == 11
+    assert () in subsets
+    assert (1, 2) in subsets
+    assert (1, 2, 3) not in subsets
+
+    with pytest.raises(ValueError, match="expected_devices must be positive"):
+        generate_device_subsets(expected_devices=0, max_simultaneous_devices=2)
+    with pytest.raises(
+        ValueError, match="max_simultaneous_devices must be between 0 and expected_devices"
+    ):
+        generate_device_subsets(expected_devices=4, max_simultaneous_devices=5)
+
+    # 2. Test get_historical_value
+    times = pd.date_range("2026-03-30 00:00:00", periods=5, freq="15min")
+    df = pd.DataFrame({"outside_temperature": [10.0, 11.0, 12.0, 13.0, 14.0]}, index=times)
+    assert (
+        get_historical_value(df, "outside_temperature", pd.Timestamp("2026-03-30 00:15:00"), 0.0)
+        == 11.0
+    )
+    assert (
+        get_historical_value(df, "outside_temperature", pd.Timestamp("2026-03-30 00:05:00"), 0.0)
+        == 10.0
+    )
+    assert (
+        get_historical_value(df, "non_existent", pd.Timestamp("2026-03-30 00:00:00"), 99.0) == 99.0
+    )
+
+    # 3. Simulate preconditioning
+    idx = pd.date_range("2026-03-30 00:00:00", periods=10, freq="15min")
+    train_df = pd.DataFrame(
+        {
+            "room_temp": [20.0] * 10,
+            "outside_temperature": [10.0] * 10,
+            "room_power_kw": [4.0] * 10,
+            "event_active": [0.0] * 10,
+        },
+        index=idx,
+    )
+    thermal_model = train_thermal_model(train_df, "heating", pd.Timestamp("2026-03-30 02:00:00"))
+
+    device_power_model = {
+        "season": "heating",
+        "expected_devices": 4,
+        "device_params": {
+            f"device_{i}": {"active_power": 2.0, "standby_power": 0.1} for i in range(1, 5)
+        },
+    }
+
+    res = simulate_preconditioning(
+        df=train_df,
+        thermal_model_dict=thermal_model,
+        device_power_model_dict=device_power_model,
+        starts_at=datetime(2026, 3, 30, 1, 0, 0),
+        offset_minutes=30,
+        active_devices=[1, 2],
+        electricity_price=0.15,
+        co2_factor=0.4,
+        comfort_min=18.0,
+        comfort_max=22.0,
+        expected_devices=4,
+    )
+
+    assert "predicted_temp_at_start" in res
+    assert res["expected_kwh"] == pytest.approx(2.1)
+    assert res["expected_cost"] == pytest.approx(2.1 * 0.15)
+    assert res["expected_co2"] == pytest.approx(2.1 * 0.4)
+    assert "violation_celsius" in res
+    assert "is_feasible" in res
+
+    # 4. Negative values / failures
+    with pytest.raises(ValueError, match="offset_minutes must be non-negative"):
+        simulate_preconditioning(
+            df=train_df,
+            thermal_model_dict=thermal_model,
+            device_power_model_dict=device_power_model,
+            starts_at=datetime(2026, 3, 30, 1, 0, 0),
+            offset_minutes=-15,
+            active_devices=[1, 2],
+            electricity_price=0.15,
+            co2_factor=0.4,
+            comfort_min=18.0,
+            comfort_max=22.0,
+        )
+
+    with pytest.raises(ValueError, match="offset_minutes must be a multiple of 15"):
+        simulate_preconditioning(
+            df=train_df,
+            thermal_model_dict=thermal_model,
+            device_power_model_dict=device_power_model,
+            starts_at=datetime(2026, 3, 30, 1, 0, 0),
+            offset_minutes=10,
+            active_devices=[1, 2],
+            electricity_price=0.15,
+            co2_factor=0.4,
+            comfort_min=18.0,
+            comfort_max=22.0,
+        )
+
+    # 5. Simulate all candidates
+    candidates = simulate_all_candidates(
+        df=train_df,
+        thermal_model_dict=thermal_model,
+        device_power_model_dict=device_power_model,
+        starts_at=datetime(2026, 3, 30, 1, 0, 0),
+        ends_at=datetime(2026, 3, 30, 2, 0, 0),
+        candidate_offsets=[0, 15, 30],
+        max_simultaneous_devices=2,
+        electricity_price=0.15,
+        co2_factor=0.4,
+        comfort_min=18.0,
+        comfort_max=22.0,
+        expected_devices=4,
+    )
+    assert len(candidates) == 33
+
+
+def _optimizer_candidate(
+    *,
+    feasible: bool = True,
+    cost: float = 1.0,
+    kwh: float = 4.0,
+    co2: float = 2.0,
+    violation: float = 0.0,
+    offset: int = 30,
+    devices: tuple[int, ...] = (1, 2),
+    predicted_temp: float = 20.0,
+) -> dict[str, object]:
+    return {
+        "predicted_temp_at_start": predicted_temp,
+        "expected_kwh": kwh,
+        "expected_cost": cost,
+        "expected_co2": co2,
+        "violation_celsius": violation,
+        "is_feasible": feasible,
+        "offset_minutes": offset,
+        "active_devices": devices,
+        "active_device_count": len(devices),
+    }
+
+
+def test_event_optimizer_selects_feasible_lowest_cost_candidate() -> None:
+    selected, diagnostics = select_best_event_candidate(
+        [
+            _optimizer_candidate(feasible=False, cost=0.01, violation=0.5, offset=0, devices=()),
+            _optimizer_candidate(feasible=True, cost=3.00, kwh=6.0, offset=45, devices=(1, 2, 3)),
+            _optimizer_candidate(feasible=True, cost=1.50, kwh=3.0, offset=30, devices=(1,)),
+        ]
+    )
+
+    assert selected["feasible"] is True
+    assert selected["expected_cost"] == pytest.approx(1.50)
+    assert selected["active_devices"] == (1,)
+    assert "feasible lowest-cost" in selected["selection_reason"]
+    assert bool(diagnostics.iloc[0]["selected"]) is True
+
+
+def test_event_optimizer_infeasible_fallback_uses_smallest_violation() -> None:
+    selected, diagnostics = select_best_event_candidate(
+        [
+            _optimizer_candidate(feasible=False, cost=0.10, violation=1.2, offset=0, devices=()),
+            _optimizer_candidate(
+                feasible=False, cost=2.00, violation=0.4, offset=45, devices=(1, 2)
+            ),
+        ]
+    )
+
+    assert selected["feasible"] is False
+    assert selected["comfort_violation_c"] == pytest.approx(0.4)
+    assert "infeasible fallback" in selected["selection_reason"]
+    assert diagnostics.iloc[0]["comfort_violation_c"] == pytest.approx(0.4)
+
+
+def test_event_optimizer_tie_breaks_by_latest_start_then_simpler_devices() -> None:
+    selected, _ = select_best_event_candidate(
+        [
+            _optimizer_candidate(cost=1.0, kwh=4.0, co2=2.0, offset=60, devices=(1,)),
+            _optimizer_candidate(cost=1.0, kwh=4.0, co2=2.0, offset=15, devices=(1, 2)),
+            _optimizer_candidate(cost=1.0, kwh=4.0, co2=2.0, offset=15, devices=(2,)),
+        ]
+    )
+
+    assert selected["candidate_start_offset_minutes"] == 15
+    assert selected["active_devices"] == (2,)
+    assert selected["active_device_count"] == 1
+
+
+def test_event_optimizer_expands_merged_windows_and_formats_schema(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    events = pd.DataFrame(
+        [
+            {
+                "event_id": "E1",
+                "starts_at": "2026-03-30 08:00:00",
+                "ends_at": "2026-03-30 09:00:00",
+            },
+            {
+                "event_id": "E2",
+                "starts_at": "2026-03-30 09:15:00",
+                "ends_at": "2026-03-30 10:00:00",
+            },
+        ]
+    )
+    df = pd.DataFrame(
+        {
+            "room_temp": [20.0],
+            "outside_temperature": [10.0],
+            "room_power_kw": [0.0],
+            "event_active": [0.0],
+        },
+        index=pd.DatetimeIndex(["2026-03-30 07:45:00"]),
+    )
+
+    def fake_simulate_all_candidates(**_: object) -> list[dict[str, object]]:
+        return [_optimizer_candidate(offset=15, devices=(1, 3), predicted_temp=21.5)]
+
+    monkeypatch.setattr(notebook_utils, "simulate_all_candidates", fake_simulate_all_candidates)
+
+    schedules, diagnostics = notebook_utils.optimize_event_control_schedules(
+        df=df,
+        events_df=events,
+        thermal_model_dict={"features": ["room_temp"]},
+        device_power_model_dict={"device_params": {}},
+        config=notebook_utils.EventControlConfig(mode="heating", min_temp=18.0, max_temp=22.0),
+        candidate_offsets=[15],
+    )
+
+    assert list(schedules.columns[: len(SCHEDULE_OUTPUT_COLUMNS)]) == SCHEDULE_OUTPUT_COLUMNS
+    assert list(schedules["event_id"]) == ["E1", "E2"]
+    assert schedules["start_time"].nunique() == 1
+    assert schedules.iloc[0]["start_time"] == pd.Timestamp("2026-03-30 07:45:00")
+    assert schedules[["device_1_on", "device_2_on", "device_3_on", "device_4_on"]].iloc[
+        0
+    ].tolist() == [1, 0, 1, 0]
+    assert schedules["target_temp"].tolist() == [18.0, 18.0]
+    assert schedules["window_id"].tolist() == ["W01", "W01"]
+    assert "Merged 2 events" in schedules.iloc[0]["window_rationale"]
+    assert diagnostics.iloc[0]["window_id"] == "W01"
+    assert bool(diagnostics.iloc[0]["selected"]) is True
+
+
+def test_event_optimizer_returns_empty_outputs_for_no_events() -> None:
+    schedules, diagnostics = notebook_utils.optimize_event_control_schedules(
+        df=pd.DataFrame(),
+        events_df=pd.DataFrame(columns=["starts_at", "ends_at"]),
+        thermal_model_dict={"features": ["room_temp"]},
+        device_power_model_dict={"device_params": {}},
+        config=notebook_utils.EventControlConfig(mode="cooling", min_temp=20.0, max_temp=24.0),
+        candidate_offsets=[0],
+    )
+
+    assert schedules.empty
+    assert list(schedules.columns) == SCHEDULE_OUTPUT_COLUMNS
+    assert diagnostics.empty
+
+
+def test_event_optimizer_rejects_empty_and_malformed_candidates() -> None:
+    with pytest.raises(ValueError, match="candidate table is empty"):
+        select_best_event_candidate([])
+
+    with pytest.raises(ValueError, match="candidate table missing required columns"):
+        select_best_event_candidate(pd.DataFrame({"expected_cost": [1.0]}))
+
+
+def test_event_optimizer_report_path_creation_and_schema_validation(
+    tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(notebook_utils, "EVENT_CONTROL_REPORT_DIR", tmp_path / "reports")
+    schedule = pd.DataFrame(
+        [
+            {
+                "event_id": "E1",
+                "mode": "heating",
+                "start_time": pd.Timestamp("2026-03-30 07:45:00"),
+                "device_1_on": 1,
+                "device_2_on": 0,
+                "device_3_on": 0,
+                "device_4_on": 0,
+                "target_temp": 18.0,
+                "predicted_temp_at_start": 20.0,
+                "expected_kwh": 1.0,
+                "expected_cost": 0.15,
+                "expected_co2": 0.4,
+                "feasible": True,
+                "selection_reason": "test",
+                "comfort_violation_c": 0.0,
+                "candidate_start_offset_minutes": 15,
+                "active_device_count": 1,
+            }
+        ]
+    )
+
+    path = save_event_control_schedule_report(schedule, mode="heating")
+
+    assert path == tmp_path / "reports" / "heating_selected_schedules.csv"
+    assert path.exists()
+    loaded = pd.read_csv(path)
+    assert list(loaded.columns) == SCHEDULE_OUTPUT_COLUMNS
+
+    with pytest.raises(ValueError, match="missing required output columns"):
+        save_event_control_schedule_report(schedule.drop(columns=["expected_co2"]), mode="heating")
+
+    with pytest.raises(ValueError, match="filename, not a path"):
+        save_event_control_schedule_report(
+            schedule, mode="heating", report_name="nested/report.csv"
+        )

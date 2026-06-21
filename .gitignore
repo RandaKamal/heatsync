@@ -10,6 +10,8 @@ __pycache__/
 .coverage.*
 mutants/
 .bg-shell/
+# Notebook execution outputs (regenerable artifacts)
+backend/notebooks/executed*.ipynb
 .claude/worktrees/
 # GSD project artifacts are tracked. Keep local/session/runtime/telemetry artifacts out of Git.
 .gsd/runtime/
@@ -103,7 +105,6 @@ plots/
 mutants
 dummy_output
 .codex
-deep-research-report.md
 
 # pytype static type analyzer
 .pytype/
@@ -185,3 +186,8 @@ heatsync-failure-simulation-backup-*/
 tmp/
 temp/
 .cache/
+event_based_device_control_task.md
+.claude
+
+# ── GSD baseline (auto-generated) ──
+.gsd-worktrees/
