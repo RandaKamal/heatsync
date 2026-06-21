@@ -4,15 +4,6 @@ This file is the explicit capability and coverage contract for the project.
 
 ## Active
 
-### R004 — Calibrate a 2R2C grey-box model and construct a Physics-Informed Neural Network (PINN) in PyTorch.
-- Class: core-capability
-- Status: active
-- Description: Calibrate a 2R2C grey-box model and construct a Physics-Informed Neural Network (PINN) in PyTorch.
-- Why it matters: To show how to integrate physical laws (heat equations) with neural network training.
-- Source: user
-- Primary owning slice: M001/S04
-- Validation: mapped
-
 ## Validated
 
 ### R001 — Load CSV datasets, align to 15-minute clock, impute missing values, and engineer time/weather/envelope features.
@@ -43,6 +34,16 @@ This file is the explicit capability and coverage contract for the project.
 - Primary owning slice: M001/S03
 - Validation: Validated via end-to-end nbconvert programmatic execution of backend/notebooks/03_forecasting_lstm.ipynb producing base (L1) and residual-corrected (L2) evaluation metrics (RMSE, MAPE) and plots, alongside passing pytest suite on backend/tests/test_lstm.py.
 - Notes: Validated in S03: PyTorch LSTM L1 base model and L2 residual correction implemented and evaluated in backend/notebooks/03_forecasting_lstm.ipynb, producing finite positive RMSE and MAPE values for both heating and cooling periods. Verified by tests under backend/tests/test_lstm.py.
+
+### R004 — Calibrate a 2R2C grey-box model and construct a Physics-Informed Neural Network (PINN) in PyTorch.
+- Class: core-capability
+- Status: validated
+- Description: Calibrate a 2R2C grey-box model and construct a Physics-Informed Neural Network (PINN) in PyTorch.
+- Why it matters: To show how to integrate physical laws (heat equations) with neural network training.
+- Source: user
+- Primary owning slice: M001/S04
+- Validation: Validated by M001/S04 physical-modeling evidence: `.gsd/milestones/M001/slices/S04/S04-SUMMARY.md` provides physical 2R2C calibration parameters and PINN convergence models, with key decisions documenting composite loss using data MSE plus finite-difference heat-equation physics residual derived from 2R2C calibration. `.gsd/milestones/M001/M001-VALIDATION.md` records 2R2C grey-box calibration convergence with positive physical parameters and passing `backend/tests/test_physical.py` coverage. `backend/tests/test_physical.py` includes PyTorch (`torch`, `nn.Module`) residual-corrector model coverage for the calibrated physical-model path.
+- Notes: M002-iiz0fq consumes the grey-box/control modeling lineage but does not own the original PINN requirement. The prior M002 validation attention item was requirement evidence drift, now reconciled to M001/S04 evidence.
 
 ### R005 — Implement Isolation Forest, One-Class SVM, and PyTorch autoencoder to identify sensor faults/alarms.
 - Class: core-capability
@@ -85,14 +86,14 @@ This file is the explicit capability and coverage contract for the project.
 | R001 | core-capability | validated | M001/S01 | none | Validated in S01: backend/notebooks/utils.py loading, downsampling/alignment, interpolation tracking, weather/time/envelope feature engineering, and notebook execution (backend/notebooks/01_preprocessing.ipynb) passing programmatically via nbconvert with cached processed artifacts in backend/data/processed/. |
 | R002 | core-capability | validated | M001/S02 | none | Validated via end-to-end nbconvert programmatic execution of backend/notebooks/02_forecasting_sarimax.ipynb producing evaluation metrics (RMSE, MAPE) and plots, alongside passing pytest suite on backend/tests/test_sarimax.py. |
 | R003 | core-capability | validated | M001/S03 | none | Validated via end-to-end nbconvert programmatic execution of backend/notebooks/03_forecasting_lstm.ipynb producing base (L1) and residual-corrected (L2) evaluation metrics (RMSE, MAPE) and plots, alongside passing pytest suite on backend/tests/test_lstm.py. |
-| R004 | core-capability | active | M001/S04 | none | mapped |
+| R004 | core-capability | validated | M001/S04 | none | Validated by M001/S04 physical-modeling evidence: `.gsd/milestones/M001/slices/S04/S04-SUMMARY.md` provides physical 2R2C calibration parameters and PINN convergence models, with key decisions documenting composite loss using data MSE plus finite-difference heat-equation physics residual derived from 2R2C calibration. `.gsd/milestones/M001/M001-VALIDATION.md` records 2R2C grey-box calibration convergence with positive physical parameters and passing `backend/tests/test_physical.py` coverage. `backend/tests/test_physical.py` includes PyTorch (`torch`, `nn.Module`) residual-corrector model coverage for the calibrated physical-model path. |
 | R005 | core-capability | validated | M001/S05 | none | Validated via end-to-end nbconvert execution of backend/notebooks/05_anomaly_detection.ipynb and passing pytest suite on backend/tests/test_anomaly.py. |
 | R006 | core-capability | validated | M001/S06 | none | Validated via programmatic nbconvert execution of 06_energy_controls.ipynb and pytest test suite on backend/tests/test_energy.py verifying comfort constraints, occupancy schedules, sensible/latent heat gains, 2R2C thermostat control loops, and scenario-based HVAC kWh savings. |
 | R007 | quality-attribute | validated | M001/S07 | none | Verified end-to-end notebook execution via pytest in backend/tests/test_notebooks.py. All 6 notebooks executed programmatically and passed with zero uncaught exceptions in 65s. |
 
 ## Coverage Summary
 
-- Active requirements: 1
-- Mapped to slices: 1
-- Validated: 6 (R001, R002, R003, R005, R006, R007)
+- Active requirements: 0
+- Mapped to slices: 0
+- Validated: 7 (R001, R002, R003, R004, R005, R006, R007)
 - Unmapped active requirements: 0
