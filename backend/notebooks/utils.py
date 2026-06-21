@@ -1436,4 +1436,305 @@ def simulate_all_candidates(
     return candidates
 
 
+SCHEDULE_OUTPUT_COLUMNS: list[str] = [
+    "event_id",
+    "mode",
+    "start_time",
+    "device_1_on",
+    "device_2_on",
+    "device_3_on",
+    "device_4_on",
+    "target_temp",
+    "predicted_temp_at_start",
+    "expected_kwh",
+    "expected_cost",
+    "expected_co2",
+    "feasible",
+    "selection_reason",
+    "comfort_violation_c",
+    "candidate_start_offset_minutes",
+    "active_device_count",
+]
+
+EVENT_CONTROL_REPORT_DIR = PROJECT_ROOT / "backend" / "artifacts" / "event_device_control" / "reports"
+
+
+CANDIDATE_DIAGNOSTIC_COLUMNS: list[str] = [
+    "window_id",
+    "candidate_rank",
+    "selected",
+    "feasible",
+    "selection_reason",
+    "comfort_violation_c",
+    "candidate_start_offset_minutes",
+    "active_device_count",
+    "active_devices",
+    "predicted_temp_at_start",
+    "expected_kwh",
+    "expected_cost",
+    "expected_co2",
+    "window_rationale",
+]
+
+
+_CANDIDATE_REQUIRED_COLUMNS: list[str] = [
+    "predicted_temp_at_start",
+    "expected_kwh",
+    "expected_cost",
+    "expected_co2",
+    "comfort_violation_c",
+    "feasible",
+    "candidate_start_offset_minutes",
+    "active_devices",
+    "active_device_count",
+]
+
+
+def _normalise_active_devices(value: Any) -> tuple[int, ...]:
+    """Convert candidate active-device values into deterministic integer tuples."""
+    if value is None or (isinstance(value, float) and pd.isna(value)):
+        return ()
+    if isinstance(value, str):
+        stripped = value.strip()
+        if not stripped:
+            return ()
+        parts = [part.strip() for part in stripped.split(",")]
+        return tuple(sorted(int(part) for part in parts if part))
+    if isinstance(value, (list, tuple, set)):
+        return tuple(sorted(int(device) for device in value))
+    if isinstance(value, np.ndarray):
+        return tuple(sorted(int(device) for device in value.tolist()))
+    raise ValueError("active_devices must be a list, tuple, set, numpy array, or comma-separated string.")
+
+
+def _candidate_device_signature(active_devices: tuple[int, ...]) -> str:
+    return ",".join(f"{device:02d}" for device in active_devices)
+
+
+def _normalise_candidate_table(candidates: list[dict[str, Any]] | pd.DataFrame) -> pd.DataFrame:
+    """Return a candidate table with the canonical columns used by schedule selection."""
+    candidate_df = candidates.copy() if isinstance(candidates, pd.DataFrame) else pd.DataFrame(candidates)
+    if candidate_df.empty:
+        raise ValueError("candidate table is empty; no schedules can be selected.")
+
+    rename_map = {
+        "is_feasible": "feasible",
+        "violation_celsius": "comfort_violation_c",
+        "offset_minutes": "candidate_start_offset_minutes",
+    }
+    for old_name, new_name in rename_map.items():
+        if new_name not in candidate_df.columns and old_name in candidate_df.columns:
+            candidate_df[new_name] = candidate_df[old_name]
+
+    missing = [col for col in _CANDIDATE_REQUIRED_COLUMNS if col not in candidate_df.columns]
+    if missing:
+        raise ValueError(f"candidate table missing required columns: {missing}")
+
+    candidate_df = candidate_df.copy()
+    candidate_df["active_devices"] = candidate_df["active_devices"].map(_normalise_active_devices)
+    candidate_df["active_device_count"] = candidate_df["active_device_count"].astype(int)
+    candidate_df["candidate_start_offset_minutes"] = candidate_df["candidate_start_offset_minutes"].astype(int)
+    for col in ["predicted_temp_at_start", "expected_kwh", "expected_cost", "expected_co2", "comfort_violation_c"]:
+        candidate_df[col] = candidate_df[col].astype(float)
+    candidate_df["feasible"] = candidate_df["feasible"].astype(bool)
+    candidate_df["_feasible_rank"] = np.where(candidate_df["feasible"], 0, 1)
+    candidate_df["_device_signature"] = candidate_df["active_devices"].map(_candidate_device_signature)
+    return candidate_df
+
+
+def select_best_event_candidate(
+    candidates: list[dict[str, Any]] | pd.DataFrame,
+    top_candidate_count: int = 5,
+) -> tuple[dict[str, Any], pd.DataFrame]:
+    """
+    Select the best optimizer candidate and return compact ranked diagnostics.
+
+    Ordering is deterministic and notebook-visible: feasible candidates win first; if no
+    feasible candidate exists, the smallest comfort violation wins. Ties then sort by
+    expected cost, energy, CO2, latest start time (smallest pre-start offset), and simpler
+    device choices.
+    """
+    if top_candidate_count <= 0:
+        raise ValueError("top_candidate_count must be positive.")
+
+    candidate_df = _normalise_candidate_table(candidates)
+    ranked = candidate_df.sort_values(
+        by=[
+            "_feasible_rank",
+            "comfort_violation_c",
+            "expected_cost",
+            "expected_kwh",
+            "expected_co2",
+            "candidate_start_offset_minutes",
+            "active_device_count",
+            "_device_signature",
+        ],
+        kind="mergesort",
+    ).reset_index(drop=True)
+    ranked["candidate_rank"] = ranked.index + 1
+
+    selected = ranked.iloc[0].to_dict()
+    if selected["feasible"]:
+        selection_reason = "feasible lowest-cost schedule selected by deterministic tie-breaks"
+    else:
+        selection_reason = "infeasible fallback with smallest comfort violation selected"
+    selected["selection_reason"] = selection_reason
+
+    diagnostics = ranked.head(top_candidate_count).copy()
+    diagnostics["selected"] = diagnostics["candidate_rank"] == 1
+    diagnostics["selection_reason"] = np.where(diagnostics["selected"], selection_reason, "top candidate for comparison")
+    diagnostics["active_devices"] = diagnostics["active_devices"].map(lambda devices: ",".join(str(device) for device in devices))
+    return selected, diagnostics
+
+
+def _schedule_rows_for_window(
+    window: ConsolidatedEventWindow,
+    selected_candidate: dict[str, Any],
+    mode: str,
+    target_temp: float,
+    expected_devices: int,
+) -> list[dict[str, Any]]:
+    active_devices = set(_normalise_active_devices(selected_candidate["active_devices"]))
+    start_time = pd.Timestamp(window.starts_at) - pd.Timedelta(
+        minutes=int(selected_candidate["candidate_start_offset_minutes"])
+    )
+
+    rows: list[dict[str, Any]] = []
+    for event_id in window.original_event_ids:
+        row = ScheduleRow(
+            event_id=str(event_id),
+            mode=mode,
+            start_time=start_time.to_pydatetime(),
+            device_1_on=int(1 in active_devices),
+            device_2_on=int(2 in active_devices),
+            device_3_on=int(3 in active_devices),
+            device_4_on=int(4 in active_devices),
+            target_temp=float(target_temp),
+            predicted_temp_at_start=float(selected_candidate["predicted_temp_at_start"]),
+            expected_kwh=float(selected_candidate["expected_kwh"]),
+            expected_cost=float(selected_candidate["expected_cost"]),
+            expected_co2=float(selected_candidate["expected_co2"]),
+            is_feasible=bool(selected_candidate["feasible"]),
+            violation_celsius=float(selected_candidate["comfort_violation_c"]),
+            selection_reason=str(selected_candidate["selection_reason"]),
+            feasible=bool(selected_candidate["feasible"]),
+            comfort_violation_c=float(selected_candidate["comfort_violation_c"]),
+            candidate_start_offset_minutes=int(selected_candidate["candidate_start_offset_minutes"]),
+            active_device_count=int(selected_candidate["active_device_count"]),
+        )
+        row_dict = asdict(row)
+        row_dict["window_id"] = window.window_id
+        row_dict["window_starts_at"] = pd.Timestamp(window.starts_at)
+        row_dict["window_ends_at"] = pd.Timestamp(window.ends_at)
+        row_dict["window_rationale"] = window.rationale
+        rows.append(row_dict)
+    return rows
+
+
+def optimize_event_control_schedules(
+    df: pd.DataFrame,
+    events_df: pd.DataFrame,
+    thermal_model_dict: dict[str, Any],
+    device_power_model_dict: dict[str, Any],
+    config: EventControlConfig,
+    candidate_offsets: list[int] | None = None,
+    max_simultaneous_devices: int = 4,
+    electricity_price: float = 0.15,
+    co2_factor: float = 0.4,
+    expected_devices: int = 4,
+    merge_threshold_minutes: float = 60.0,
+    top_candidate_count: int = 5,
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """
+    Optimize selected control schedules for consolidated validation events.
+
+    Returns:
+        (schedule_df, diagnostics_df), where schedule_df is expanded back to one row
+        per original event and diagnostics_df contains compact ranked candidate views.
+    """
+    config.validate()
+    if expected_devices != 4:
+        raise ValueError("schedule formatting currently requires expected_devices=4.")
+    if max_simultaneous_devices < 0 or max_simultaneous_devices > expected_devices:
+        raise ValueError("max_simultaneous_devices must be between 0 and expected_devices.")
+
+    if candidate_offsets is None:
+        max_offset = int(config.precondition_hours * 60)
+        candidate_offsets = list(range(0, max_offset + 1, 15))
+    if not candidate_offsets:
+        raise ValueError("candidate_offsets must contain at least one offset.")
+    if any(offset < 0 or offset % 15 != 0 for offset in candidate_offsets):
+        raise ValueError("candidate_offsets must be non-negative multiples of 15 minutes.")
+
+    windows = consolidate_event_windows(events_df, merge_threshold_minutes=merge_threshold_minutes)
+    if not windows:
+        return pd.DataFrame(columns=SCHEDULE_OUTPUT_COLUMNS), pd.DataFrame(columns=CANDIDATE_DIAGNOSTIC_COLUMNS)
+
+    target_temp = config.min_temp if config.mode == "heating" else config.max_temp
+    schedule_rows: list[dict[str, Any]] = []
+    diagnostic_rows: list[pd.DataFrame] = []
+
+    for window in windows:
+        candidates = simulate_all_candidates(
+            df=df,
+            thermal_model_dict=thermal_model_dict,
+            device_power_model_dict=device_power_model_dict,
+            starts_at=window.starts_at,
+            ends_at=window.ends_at,
+            candidate_offsets=candidate_offsets,
+            max_simultaneous_devices=max_simultaneous_devices,
+            electricity_price=electricity_price,
+            co2_factor=co2_factor,
+            comfort_min=config.min_temp,
+            comfort_max=config.max_temp,
+            expected_devices=expected_devices,
+        )
+        selected, diagnostics = select_best_event_candidate(candidates, top_candidate_count=top_candidate_count)
+        schedule_rows.extend(_schedule_rows_for_window(window, selected, config.mode, target_temp, expected_devices))
+
+        diagnostics = diagnostics.copy()
+        diagnostics["window_id"] = window.window_id
+        diagnostics["window_rationale"] = window.rationale
+        diagnostics["original_event_ids"] = ",".join(window.original_event_ids)
+        diagnostic_rows.append(diagnostics)
+
+    schedule_df = pd.DataFrame(schedule_rows)
+    schedule_order = SCHEDULE_OUTPUT_COLUMNS + [
+        col for col in schedule_df.columns if col not in SCHEDULE_OUTPUT_COLUMNS
+    ]
+    schedule_df = schedule_df[schedule_order]
+
+    diagnostics_df = pd.concat(diagnostic_rows, ignore_index=True) if diagnostic_rows else pd.DataFrame()
+    diagnostic_order = CANDIDATE_DIAGNOSTIC_COLUMNS + [
+        col for col in diagnostics_df.columns if col not in CANDIDATE_DIAGNOSTIC_COLUMNS and not col.startswith("_")
+    ]
+    diagnostics_df = diagnostics_df[diagnostic_order]
+    return schedule_df, diagnostics_df
+
+
+def save_event_control_schedule_report(
+    schedule_df: pd.DataFrame,
+    mode: str,
+    report_name: str | None = None,
+) -> pathlib.Path:
+    """Persist selected event-control schedules to the owned local reports directory."""
+    if mode not in ["heating", "cooling"]:
+        raise ValueError("mode must be 'heating' or 'cooling'.")
+    missing = [col for col in SCHEDULE_OUTPUT_COLUMNS if col not in schedule_df.columns]
+    if missing:
+        raise ValueError(f"schedule_df missing required output columns before persistence: {missing}")
+
+    if report_name is None:
+        report_name = f"{mode}_selected_schedules.csv"
+    report_path = pathlib.Path(report_name)
+    if report_path.name != report_name:
+        raise ValueError("report_name must be a filename, not a path.")
+
+    output_dir = EVENT_CONTROL_REPORT_DIR.resolve()
+    output_dir.mkdir(parents=True, exist_ok=True)
+    path = output_dir / report_name
+    schedule_df.to_csv(path, index=False)
+    return path
+
+
 

@@ -5,6 +5,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
+import notebooks.utils as notebook_utils
 from notebooks.utils import (
     align_to_15min,
     build_aligned_dataset,
@@ -30,6 +31,9 @@ from notebooks.utils import (
     get_historical_value,
     simulate_preconditioning,
     simulate_all_candidates,
+    select_best_event_candidate,
+    save_event_control_schedule_report,
+    SCHEDULE_OUTPUT_COLUMNS,
 )
 
 EXPECTED_ALIGNED_ROWS_WITH_LONG_GAP = 8
@@ -943,6 +947,164 @@ def test_event_candidate_simulation() -> None:
     assert len(candidates) == 33
 
 
+def _optimizer_candidate(
+    *,
+    feasible: bool = True,
+    cost: float = 1.0,
+    kwh: float = 4.0,
+    co2: float = 2.0,
+    violation: float = 0.0,
+    offset: int = 30,
+    devices: tuple[int, ...] = (1, 2),
+    predicted_temp: float = 20.0,
+) -> dict[str, object]:
+    return {
+        "predicted_temp_at_start": predicted_temp,
+        "expected_kwh": kwh,
+        "expected_cost": cost,
+        "expected_co2": co2,
+        "violation_celsius": violation,
+        "is_feasible": feasible,
+        "offset_minutes": offset,
+        "active_devices": devices,
+        "active_device_count": len(devices),
+    }
 
+
+def test_event_optimizer_selects_feasible_lowest_cost_candidate() -> None:
+    selected, diagnostics = select_best_event_candidate([
+        _optimizer_candidate(feasible=False, cost=0.01, violation=0.5, offset=0, devices=()),
+        _optimizer_candidate(feasible=True, cost=3.00, kwh=6.0, offset=45, devices=(1, 2, 3)),
+        _optimizer_candidate(feasible=True, cost=1.50, kwh=3.0, offset=30, devices=(1,)),
+    ])
+
+    assert selected["feasible"] is True
+    assert selected["expected_cost"] == pytest.approx(1.50)
+    assert selected["active_devices"] == (1,)
+    assert "feasible lowest-cost" in selected["selection_reason"]
+    assert bool(diagnostics.iloc[0]["selected"]) is True
+
+
+def test_event_optimizer_infeasible_fallback_uses_smallest_violation() -> None:
+    selected, diagnostics = select_best_event_candidate([
+        _optimizer_candidate(feasible=False, cost=0.10, violation=1.2, offset=0, devices=()),
+        _optimizer_candidate(feasible=False, cost=2.00, violation=0.4, offset=45, devices=(1, 2)),
+    ])
+
+    assert selected["feasible"] is False
+    assert selected["comfort_violation_c"] == pytest.approx(0.4)
+    assert "infeasible fallback" in selected["selection_reason"]
+    assert diagnostics.iloc[0]["comfort_violation_c"] == pytest.approx(0.4)
+
+
+def test_event_optimizer_tie_breaks_by_latest_start_then_simpler_devices() -> None:
+    selected, _ = select_best_event_candidate([
+        _optimizer_candidate(cost=1.0, kwh=4.0, co2=2.0, offset=60, devices=(1,)),
+        _optimizer_candidate(cost=1.0, kwh=4.0, co2=2.0, offset=15, devices=(1, 2)),
+        _optimizer_candidate(cost=1.0, kwh=4.0, co2=2.0, offset=15, devices=(2,)),
+    ])
+
+    assert selected["candidate_start_offset_minutes"] == 15
+    assert selected["active_devices"] == (2,)
+    assert selected["active_device_count"] == 1
+
+
+def test_event_optimizer_expands_merged_windows_and_formats_schema(monkeypatch: pytest.MonkeyPatch) -> None:
+    events = pd.DataFrame([
+        {"event_id": "E1", "starts_at": "2026-03-30 08:00:00", "ends_at": "2026-03-30 09:00:00"},
+        {"event_id": "E2", "starts_at": "2026-03-30 09:15:00", "ends_at": "2026-03-30 10:00:00"},
+    ])
+    df = pd.DataFrame(
+        {"room_temp": [20.0], "outside_temperature": [10.0], "room_power_kw": [0.0], "event_active": [0.0]},
+        index=pd.DatetimeIndex(["2026-03-30 07:45:00"]),
+    )
+
+    def fake_simulate_all_candidates(**_: object) -> list[dict[str, object]]:
+        return [_optimizer_candidate(offset=15, devices=(1, 3), predicted_temp=21.5)]
+
+    monkeypatch.setattr(notebook_utils, "simulate_all_candidates", fake_simulate_all_candidates)
+
+    schedules, diagnostics = notebook_utils.optimize_event_control_schedules(
+        df=df,
+        events_df=events,
+        thermal_model_dict={"features": ["room_temp"]},
+        device_power_model_dict={"device_params": {}},
+        config=notebook_utils.EventControlConfig(mode="heating", min_temp=18.0, max_temp=22.0),
+        candidate_offsets=[15],
+    )
+
+    assert list(schedules.columns[: len(SCHEDULE_OUTPUT_COLUMNS)]) == SCHEDULE_OUTPUT_COLUMNS
+    assert list(schedules["event_id"]) == ["E1", "E2"]
+    assert schedules["start_time"].nunique() == 1
+    assert schedules.iloc[0]["start_time"] == pd.Timestamp("2026-03-30 07:45:00")
+    assert schedules[["device_1_on", "device_2_on", "device_3_on", "device_4_on"]].iloc[0].tolist() == [1, 0, 1, 0]
+    assert schedules["target_temp"].tolist() == [18.0, 18.0]
+    assert schedules["window_id"].tolist() == ["W01", "W01"]
+    assert "Merged 2 events" in schedules.iloc[0]["window_rationale"]
+    assert diagnostics.iloc[0]["window_id"] == "W01"
+    assert bool(diagnostics.iloc[0]["selected"]) is True
+
+
+def test_event_optimizer_returns_empty_outputs_for_no_events() -> None:
+    schedules, diagnostics = notebook_utils.optimize_event_control_schedules(
+        df=pd.DataFrame(),
+        events_df=pd.DataFrame(columns=["starts_at", "ends_at"]),
+        thermal_model_dict={"features": ["room_temp"]},
+        device_power_model_dict={"device_params": {}},
+        config=notebook_utils.EventControlConfig(mode="cooling", min_temp=20.0, max_temp=24.0),
+        candidate_offsets=[0],
+    )
+
+    assert schedules.empty
+    assert list(schedules.columns) == SCHEDULE_OUTPUT_COLUMNS
+    assert diagnostics.empty
+
+
+def test_event_optimizer_rejects_empty_and_malformed_candidates() -> None:
+    with pytest.raises(ValueError, match="candidate table is empty"):
+        select_best_event_candidate([])
+
+    with pytest.raises(ValueError, match="candidate table missing required columns"):
+        select_best_event_candidate(pd.DataFrame({"expected_cost": [1.0]}))
+
+
+def test_event_optimizer_report_path_creation_and_schema_validation(
+    tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(notebook_utils, "EVENT_CONTROL_REPORT_DIR", tmp_path / "reports")
+    schedule = pd.DataFrame([
+        {
+            "event_id": "E1",
+            "mode": "heating",
+            "start_time": pd.Timestamp("2026-03-30 07:45:00"),
+            "device_1_on": 1,
+            "device_2_on": 0,
+            "device_3_on": 0,
+            "device_4_on": 0,
+            "target_temp": 18.0,
+            "predicted_temp_at_start": 20.0,
+            "expected_kwh": 1.0,
+            "expected_cost": 0.15,
+            "expected_co2": 0.4,
+            "feasible": True,
+            "selection_reason": "test",
+            "comfort_violation_c": 0.0,
+            "candidate_start_offset_minutes": 15,
+            "active_device_count": 1,
+        }
+    ])
+
+    path = save_event_control_schedule_report(schedule, mode="heating")
+
+    assert path == tmp_path / "reports" / "heating_selected_schedules.csv"
+    assert path.exists()
+    loaded = pd.read_csv(path)
+    assert list(loaded.columns) == SCHEDULE_OUTPUT_COLUMNS
+
+    with pytest.raises(ValueError, match="missing required output columns"):
+        save_event_control_schedule_report(schedule.drop(columns=["expected_co2"]), mode="heating")
+
+    with pytest.raises(ValueError, match="filename, not a path"):
+        save_event_control_schedule_report(schedule, mode="heating", report_name="nested/report.csv")
 
 
