@@ -1,0 +1,617 @@
+I001 [*] Import block is un-sorted or un-formatted
+  --> backend/notebooks/utils.py:5:1
+   |
+ 3 |   """
+ 4 |
+ 5 | / import logging
+ 6 | | import pathlib
+ 7 | | import warnings
+ 8 | | import json
+ 9 | | import itertools
+10 | | from typing import Any
+11 | | from dataclasses import dataclass, asdict, field
+12 | | from datetime import datetime
+13 | |
+14 | | import numpy as np
+15 | | import joblib
+16 | | import pandas as pd
+17 | | from sklearn.linear_model import Ridge
+18 | | from sklearn.preprocessing import StandardScaler
+   | |________________________________________________^
+19 |
+20 |   logger = logging.getLogger(__name__)
+   |
+help: Organize imports
+
+SIM103 Return the condition `not c_cool < -threshold` directly
+   --> backend/notebooks/utils.py:709:5
+    |
+707 |       if c_heat < -threshold:
+708 |           return False
+709 | /     if c_cool < -threshold:
+710 | |         return False
+711 | |     return True
+    | |_______________^
+    |
+help: Replace with `return not c_cool < -threshold`
+
+E501 Line too long (120 > 100)
+   --> backend/notebooks/utils.py:722:101
+    |
+720 |     """
+721 |     Train a grey-box thermal model using Ridge regression.
+722 |     Equation: T_next = a*T_room + b*T_outside + c_heat*total_heating_power - c_cool*total_cooling_power + d*event_active
+    |                                                                                                     ^^^^^^^^^^^^^^^^^^^^
+723 |     """
+724 |     if season not in ["heating", "cooling"]:
+    |
+
+RUF005 Consider `["T_next", *feature_cols]` instead of concatenation
+   --> backend/notebooks/utils.py:731:37
+    |
+730 |     feature_cols = ["room_temp", "outside_temperature", "room_power_kw", "event_active"]
+731 |     df_copy = df_copy.dropna(subset=["T_next"] + feature_cols)
+    |                                     ^^^^^^^^^^^^^^^^^^^^^^^^^
+732 |
+733 |     train_df = df_copy[df_copy.index < split_timestamp]
+    |
+help: Replace with `["T_next", *feature_cols]`
+
+E501 Line too long (117 > 100)
+   --> backend/notebooks/utils.py:762:101
+    |
+761 |     if not is_plausible:
+762 |         fallback_reason = f"Implausible coefficients: a={a:.6f}, b={b:.6f}, c_heat={c_heat:.6f}, c_cool={c_cool:.6f}"
+    |                                                                                                     ^^^^^^^^^^^^^^^^^
+763 |         logger.warning(f"Activating room-level fallback for season {season}: {fallback_reason}")
+    |
+
+E501 Line too long (119 > 100)
+   --> backend/notebooks/utils.py:890:101
+    |
+888 |         p_active = device_params[f"device_{i}"]["active_power"]
+889 |         p_standby = device_params[f"device_{i}"]["standby_power"]
+890 |         preds_df[f"device_{i}_predicted_power_kw"] = active_decisions * p_active + (1.0 - active_decisions) * p_standby
+    |                                                                                                     ^^^^^^^^^^^^^^^^^^^
+891 |     return preds_df
+    |
+
+UP015 [*] Unnecessary mode argument
+    --> backend/notebooks/utils.py:999:30
+     |
+ 997 |     model = joblib.load(thermal_model_path)
+ 998 |     scaler = joblib.load(scaler_path)
+ 999 |     with open(metadata_path, "r") as f:
+     |                              ^^^
+1000 |         metadata = json.load(f)
+1001 |     device_power_model_dict = joblib.load(power_model_path)
+     |
+help: Remove mode argument
+
+E501 Line too long (170 > 100)
+    --> backend/notebooks/utils.py:1017:101
+     |
+1015 | …
+1016 | …
+1017 | …mperature", "room_power_kw", "event_active"] if not metadata.get("is_fallback") else ["room_temp"]),
+     |                                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+1018 | …
+     |
+
+UP015 [*] Unnecessary mode argument
+    --> backend/notebooks/utils.py:1025:38
+     |
+1023 |         feature_cols_path = dir_path / "feature_columns.json"
+1024 |     if feature_cols_path.exists():
+1025 |         with open(feature_cols_path, "r") as f:
+     |                                      ^^^
+1026 |             thermal_model_dict["features"] = json.load(f)
+     |
+help: Remove mode argument
+
+E501 Line too long (127 > 100)
+    --> backend/notebooks/utils.py:1045:101
+     |
+1043 |             raise ValueError(f"Invalid mode '{self.mode}'. Expected 'heating' or 'cooling'.")
+1044 |         if self.min_temp >= self.max_temp:
+1045 |             raise ValueError(f"Invalid comfort band: min_temp ({self.min_temp}) must be less than max_temp ({self.max_temp}).")
+     |                                                                                                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+1046 |         if self.precondition_hours < 0.0:
+1047 |             raise ValueError("precondition_hours must be non-negative.")
+     |
+
+E501 Line too long (102 > 100)
+    --> backend/notebooks/utils.py:1108:101
+     |
+1108 | def discover_device_columns(df: pd.DataFrame, expected_devices: int = 4) -> dict[str, dict[str, str]]:
+     |                                                                                                     ^^
+1109 |     """
+1110 |     Discover and map device indices to their respective power and active column names in a wide DataFrame.
+     |
+
+E501 Line too long (106 > 100)
+    --> backend/notebooks/utils.py:1110:101
+     |
+1108 | def discover_device_columns(df: pd.DataFrame, expected_devices: int = 4) -> dict[str, dict[str, str]]:
+1109 |     """
+1110 |     Discover and map device indices to their respective power and active column names in a wide DataFrame.
+     |                                                                                                     ^^^^^^
+1111 |     Returns a dict mapping e.g., 'device_1' -> {'power': 'device_1_power_kw', 'active': 'device_1_active'}
+1112 |     """
+     |
+
+E501 Line too long (106 > 100)
+    --> backend/notebooks/utils.py:1111:101
+     |
+1109 |     """
+1110 |     Discover and map device indices to their respective power and active column names in a wide DataFrame.
+1111 |     Returns a dict mapping e.g., 'device_1' -> {'power': 'device_1_power_kw', 'active': 'device_1_active'}
+     |                                                                                                     ^^^^^^
+1112 |     """
+1113 |     mapping = {}
+     |
+
+E501 Line too long (104 > 100)
+    --> backend/notebooks/utils.py:1139:101
+     |
+1137 |             df_copy.set_index("timestamp", inplace=True)
+1138 |         else:
+1139 |             raise ValueError("DataFrame index must be a DatetimeIndex or contain a 'timestamp' column.")
+     |                                                                                                     ^^^^
+1140 |     else:
+1141 |         df_copy = df.copy()
+     |
+
+E501 Line too long (101 > 100)
+    --> backend/notebooks/utils.py:1177:101
+     |
+1175 |     Args:
+1176 |         events_df: pd.DataFrame with ['starts_at', 'ends_at'] columns, and optionally ['event_id'].
+1177 |                    If 'event_id' is missing, it will auto-assign sequential IDs ('E01', 'E02', etc.).
+     |                                                                                                     ^
+1178 |         merge_threshold_minutes: Threshold in minutes. If the gap between two event windows is <= this threshold,
+1179 |                                  they are merged into a single consolidated window.
+     |
+
+E501 Line too long (113 > 100)
+    --> backend/notebooks/utils.py:1178:101
+     |
+1176 |         events_df: pd.DataFrame with ['starts_at', 'ends_at'] columns, and optionally ['event_id'].
+1177 |                    If 'event_id' is missing, it will auto-assign sequential IDs ('E01', 'E02', etc.).
+1178 |         merge_threshold_minutes: Threshold in minutes. If the gap between two event windows is <= this threshold,
+     |                                                                                                     ^^^^^^^^^^^^^
+1179 |                                  they are merged into a single consolidated window.
+1180 |                                  Must be non-negative.
+     |
+
+E501 Line too long (107 > 100)
+    --> backend/notebooks/utils.py:1271:101
+     |
+1271 | def generate_device_subsets(expected_devices: int, max_simultaneous_devices: int) -> list[tuple[int, ...]]:
+     |                                                                                                     ^^^^^^^
+1272 |     """
+1273 |     Generate all valid active device subsets subject to max simultaneous devices constraints.
+     |
+
+PLR2004 Magic value used in comparison, consider replacing `1e-9` with a constant variable
+    --> backend/notebooks/utils.py:1382:41
+     |
+1380 |     # Comfort violation
+1381 |     violation_celsius = max(0.0, comfort_min - current_temp) + max(0.0, current_temp - comfort_max)
+1382 |     is_feasible = (violation_celsius <= 1e-9)
+     |                                         ^^^^
+1383 |     
+1384 |     return {
+     |
+
+E501 Line too long (102 > 100)
+    --> backend/notebooks/utils.py:1459:101
+     |
+1457 | ]
+1458 |
+1459 | EVENT_CONTROL_REPORT_DIR = PROJECT_ROOT / "backend" / "artifacts" / "event_device_control" / "reports"
+     |                                                                                                     ^^
+     |
+
+PLR2004 Magic value used in comparison, consider replacing `2` with a constant variable
+    --> backend/notebooks/utils.py:1510:21
+     |
+1509 | def _validation_interval_hours(index: pd.DatetimeIndex) -> float:
+1510 |     if len(index) < 2:
+     |                     ^
+1511 |         return 0.25
+1512 |     diffs = pd.Series(index.sort_values()).diff().dropna()
+     |
+
+E501 Line too long (114 > 100)
+    --> backend/notebooks/utils.py:1522:101
+     |
+1520 |         if col in validation_df.columns:
+1521 |             return col
+1522 |     raise ValueError("validation_df must contain a baseline power column such as room_power_kw or power_draw_kw.")
+     |                                                                                                     ^^^^^^^^^^^^^^
+     |
+
+E501 Line too long (101 > 100)
+    --> backend/notebooks/utils.py:1544:101
+     |
+1542 |         return "comfort_missed", f"comfort violation remained at {comfort_violation_c:.3f} C"
+1543 |     if cost_savings_eur < -neutral_tolerance_eur:
+1544 |         return "negative_savings", f"smart control increased cost by {abs(cost_savings_eur):.3f} EUR"
+     |                                                                                                     ^
+1545 |     if abs(cost_savings_eur) <= neutral_tolerance_eur:
+1546 |         return "neutral_savings", "smart-control cost savings are near zero"
+     |
+
+E501 Line too long (128 > 100)
+    --> backend/notebooks/utils.py:1555:101
+     |
+1553 |     expected_devices: int,
+1554 | ) -> pd.DataFrame:
+1555 |     controls = pd.DataFrame(0.0, index=validation_index, columns=[f"device_{i}_active" for i in range(1, expected_devices + 1)])
+     |                                                                                                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+1556 |     controls["event_id"] = ""
+1557 |     controls["smart_control_active"] = 0.0
+     |
+
+E501 Line too long (102 > 100)
+    --> backend/notebooks/utils.py:1574:101
+     |
+1572 |             controls.loc[mask, active_col] = float(row.get(schedule_col, 0.0))
+1573 |         existing = controls.loc[mask, "event_id"].astype(str)
+1574 |         controls.loc[mask, "event_id"] = np.where(existing == "", event_id, existing + ";" + event_id)
+     |                                                                                                     ^^
+1575 |         controls.loc[mask, "smart_control_active"] = 1.0
+1576 |     return controls
+     |
+
+E501 Line too long (122 > 100)
+    --> backend/notebooks/utils.py:1629:101
+     |
+1627 |     comparison["cumulative_smart_co2_kg"] = comparison["smart_co2_kg"].cumsum()
+1628 |
+1629 |     comparison["room_temp"] = validation_df["room_temp"].astype(float) if "room_temp" in validation_df.columns else np.nan
+     |                                                                                                     ^^^^^^^^^^^^^^^^^^^^^^
+1630 |     comparison["comfort_min"] = np.nan if comfort_min is None else float(comfort_min)
+1631 |     comparison["comfort_max"] = np.nan if comfort_max is None else float(comfort_max)
+     |
+
+E501 Line too long (102 > 100)
+    --> backend/notebooks/utils.py:1644:101
+     |
+1642 |     for i in range(1, expected_devices + 1):
+1643 |         comparison[f"smart_device_{i}_active"] = controls[f"device_{i}_active"]
+1644 |         comparison[f"smart_device_{i}_power_kw"] = smart_predictions[f"device_{i}_predicted_power_kw"]
+     |                                                                                                     ^^
+1645 |
+1646 |     ordered = COMPARISON_TIMESERIES_COLUMNS + [col for col in comparison.columns if col not in COMPARISON_TIMESERIES_COLUMNS]
+     |
+
+E501 Line too long (125 > 100)
+    --> backend/notebooks/utils.py:1646:101
+     |
+1644 |         comparison[f"smart_device_{i}_power_kw"] = smart_predictions[f"device_{i}_predicted_power_kw"]
+1645 |
+1646 |     ordered = COMPARISON_TIMESERIES_COLUMNS + [col for col in comparison.columns if col not in COMPARISON_TIMESERIES_COLUMNS]
+     |                                                                                                     ^^^^^^^^^^^^^^^^^^^^^^^^^
+1647 |     return comparison[ordered]
+     |
+
+SIM108 Use ternary operator `end = start + pd.Timedelta(minutes=15) if pd.isna(end_value) else pd.Timestamp(end_value)` instead of `if`-`else`-block
+    --> backend/notebooks/utils.py:1657:5
+     |
+1655 |       if pd.isna(end_value):
+1656 |           end_value = row.get("window_starts_at", pd.NaT)
+1657 | /     if pd.isna(end_value):
+1658 | |         end = start + pd.Timedelta(minutes=15)
+1659 | |     else:
+1660 | |         end = pd.Timestamp(end_value)
+     | |_____________________________________^
+1661 |       if end <= start:
+1662 |           end = start + pd.Timedelta(minutes=15)
+     |
+help: Replace `if`-`else`-block with `end = start + pd.Timedelta(minutes=15) if pd.isna(end_value) else pd.Timestamp(end_value)`
+
+PLR2004 Magic value used in comparison, consider replacing `1e-12` with a constant variable
+    --> backend/notebooks/utils.py:1667:25
+     |
+1666 | def _pct_savings(savings: float, baseline: float) -> float:
+1667 |     if abs(baseline) <= 1e-12:
+     |                         ^^^^^
+1668 |         return 0.0
+1669 |     return float(savings / baseline * 100.0)
+     |
+
+E501 Line too long (105 > 100)
+    --> backend/notebooks/utils.py:1680:101
+     |
+1678 | ) -> pd.DataFrame:
+1679 |     """Preserve schedule rows and append event/window comparison and status metrics."""
+1680 |     _require_schedule_columns(schedule_df, ["event_id", "start_time", "feasible", "comfort_violation_c"])
+     |                                                                                                     ^^^^^
+1681 |     metric_rows: list[dict[str, Any]] = []
+1682 |     for _, row in schedule_df.iterrows():
+     |
+
+E501 Line too long (105 > 100)
+    --> backend/notebooks/utils.py:1684:101
+     |
+1682 |     for _, row in schedule_df.iterrows():
+1683 |         event_slice = comparison_df.loc[_event_window_mask(comparison_df, row)]
+1684 |         baseline_kwh = float(event_slice["baseline_kwh"].sum()) if "baseline_kwh" in event_slice else 0.0
+     |                                                                                                     ^^^^^
+1685 |         smart_kwh = float(event_slice["smart_kwh"].sum()) if "smart_kwh" in event_slice else 0.0
+1686 |         baseline_cost = float(event_slice["baseline_cost_eur"].sum()) if "baseline_cost_eur" in event_slice else 0.0
+     |
+
+E501 Line too long (116 > 100)
+    --> backend/notebooks/utils.py:1686:101
+     |
+1684 |         baseline_kwh = float(event_slice["baseline_kwh"].sum()) if "baseline_kwh" in event_slice else 0.0
+1685 |         smart_kwh = float(event_slice["smart_kwh"].sum()) if "smart_kwh" in event_slice else 0.0
+1686 |         baseline_cost = float(event_slice["baseline_cost_eur"].sum()) if "baseline_cost_eur" in event_slice else 0.0
+     |                                                                                                     ^^^^^^^^^^^^^^^^
+1687 |         smart_cost = float(event_slice["smart_cost_eur"].sum()) if "smart_cost_eur" in event_slice else 0.0
+1688 |         baseline_co2 = float(event_slice["baseline_co2_kg"].sum()) if "baseline_co2_kg" in event_slice else 0.0
+     |
+
+E501 Line too long (107 > 100)
+    --> backend/notebooks/utils.py:1687:101
+     |
+1685 |         smart_kwh = float(event_slice["smart_kwh"].sum()) if "smart_kwh" in event_slice else 0.0
+1686 |         baseline_cost = float(event_slice["baseline_cost_eur"].sum()) if "baseline_cost_eur" in event_slice else 0.0
+1687 |         smart_cost = float(event_slice["smart_cost_eur"].sum()) if "smart_cost_eur" in event_slice else 0.0
+     |                                                                                                     ^^^^^^^
+1688 |         baseline_co2 = float(event_slice["baseline_co2_kg"].sum()) if "baseline_co2_kg" in event_slice else 0.0
+1689 |         smart_co2 = float(event_slice["smart_co2_kg"].sum()) if "smart_co2_kg" in event_slice else 0.0
+     |
+
+E501 Line too long (111 > 100)
+    --> backend/notebooks/utils.py:1688:101
+     |
+1686 |         baseline_cost = float(event_slice["baseline_cost_eur"].sum()) if "baseline_cost_eur" in event_slice else 0.0
+1687 |         smart_cost = float(event_slice["smart_cost_eur"].sum()) if "smart_cost_eur" in event_slice else 0.0
+1688 |         baseline_co2 = float(event_slice["baseline_co2_kg"].sum()) if "baseline_co2_kg" in event_slice else 0.0
+     |                                                                                                     ^^^^^^^^^^^
+1689 |         smart_co2 = float(event_slice["smart_co2_kg"].sum()) if "smart_co2_kg" in event_slice else 0.0
+1690 |         energy_savings = baseline_kwh - smart_kwh
+     |
+
+E501 Line too long (102 > 100)
+    --> backend/notebooks/utils.py:1689:101
+     |
+1687 |         smart_cost = float(event_slice["smart_cost_eur"].sum()) if "smart_cost_eur" in event_slice else 0.0
+1688 |         baseline_co2 = float(event_slice["baseline_co2_kg"].sum()) if "baseline_co2_kg" in event_slice else 0.0
+1689 |         smart_co2 = float(event_slice["smart_co2_kg"].sum()) if "smart_co2_kg" in event_slice else 0.0
+     |                                                                                                     ^^
+1690 |         energy_savings = baseline_kwh - smart_kwh
+1691 |         cost_savings = baseline_cost - smart_cost
+     |
+
+E501 Line too long (111 > 100)
+    --> backend/notebooks/utils.py:1694:101
+     |
+1692 |         co2_savings = baseline_co2 - smart_co2
+1693 |
+1694 |         temps = event_slice["room_temp"].dropna() if "room_temp" in event_slice else pd.Series(dtype="float64")
+     |                                                                                                     ^^^^^^^^^^^
+1695 |         target = float(row.get("target_temp", np.nan))
+1696 |         if temps.empty or pd.isna(target):
+     |
+
+E501 Line too long (101 > 100)
+    --> backend/notebooks/utils.py:1704:101
+     |
+1702 |             rmse = float(np.sqrt((errors ** 2).mean()))
+1703 |
+1704 |         if "inside_comfort_band" in event_slice and event_slice["inside_comfort_band"].notna().any():
+     |                                                                                                     ^
+1705 |             comfort_hit_rate = float(event_slice["inside_comfort_band"].mean())
+1706 |         elif comfort_min is not None and comfort_max is not None and not temps.empty:
+     |
+
+E501 Line too long (140 > 100)
+    --> backend/notebooks/utils.py:1710:101
+     |
+1708 | …
+1709 | …
+1710 | …tes_violation"].sum()) if "degree_minutes_violation" in event_slice else float("nan")
+     |                                               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+1711 | …
+1712 | …ation_c", 0.0))
+     |
+
+E501 Line too long (106 > 100)
+    --> backend/notebooks/utils.py:1739:101
+     |
+1737 |         })
+1738 |     metrics_df = pd.DataFrame(metric_rows, index=schedule_df.index)
+1739 |     report_df = pd.concat([schedule_df.reset_index(drop=True), metrics_df.reset_index(drop=True)], axis=1)
+     |                                                                                                     ^^^^^^
+1740 |     return report_df[[*schedule_df.columns, *EVENT_CONTROL_REPORT_METRIC_COLUMNS]]
+     |
+
+E501 Line too long (106 > 100)
+    --> backend/notebooks/utils.py:1788:101
+     |
+1786 |     if isinstance(value, np.ndarray):
+1787 |         return tuple(sorted(int(device) for device in value.tolist()))
+1788 |     raise ValueError("active_devices must be a list, tuple, set, numpy array, or comma-separated string.")
+     |                                                                                                     ^^^^^^
+     |
+
+E501 Line too long (106 > 100)
+    --> backend/notebooks/utils.py:1797:101
+     |
+1795 | def _normalise_candidate_table(candidates: list[dict[str, Any]] | pd.DataFrame) -> pd.DataFrame:
+1796 |     """Return a candidate table with the canonical columns used by schedule selection."""
+1797 |     candidate_df = candidates.copy() if isinstance(candidates, pd.DataFrame) else pd.DataFrame(candidates)
+     |                                                                                                     ^^^^^^
+1798 |     if candidate_df.empty:
+1799 |         raise ValueError("candidate table is empty; no schedules can be selected.")
+     |
+
+E501 Line too long (111 > 100)
+    --> backend/notebooks/utils.py:1817:101
+     |
+1815 |     candidate_df["active_devices"] = candidate_df["active_devices"].map(_normalise_active_devices)
+1816 |     candidate_df["active_device_count"] = candidate_df["active_device_count"].astype(int)
+1817 |     candidate_df["candidate_start_offset_minutes"] = candidate_df["candidate_start_offset_minutes"].astype(int)
+     |                                                                                                     ^^^^^^^^^^^
+1818 |     for col in ["predicted_temp_at_start", "expected_kwh", "expected_cost", "expected_co2", "comfort_violation_c"]:
+1819 |         candidate_df[col] = candidate_df[col].astype(float)
+     |
+
+E501 Line too long (115 > 100)
+    --> backend/notebooks/utils.py:1818:101
+     |
+1816 |     candidate_df["active_device_count"] = candidate_df["active_device_count"].astype(int)
+1817 |     candidate_df["candidate_start_offset_minutes"] = candidate_df["candidate_start_offset_minutes"].astype(int)
+1818 |     for col in ["predicted_temp_at_start", "expected_kwh", "expected_cost", "expected_co2", "comfort_violation_c"]:
+     |                                                                                                     ^^^^^^^^^^^^^^^
+1819 |         candidate_df[col] = candidate_df[col].astype(float)
+1820 |     candidate_df["feasible"] = candidate_df["feasible"].astype(bool)
+     |
+
+E501 Line too long (103 > 100)
+    --> backend/notebooks/utils.py:1822:101
+     |
+1820 |     candidate_df["feasible"] = candidate_df["feasible"].astype(bool)
+1821 |     candidate_df["_feasible_rank"] = np.where(candidate_df["feasible"], 0, 1)
+1822 |     candidate_df["_device_signature"] = candidate_df["active_devices"].map(_candidate_device_signature)
+     |                                                                                                     ^^^
+1823 |     return candidate_df
+     |
+
+E501 Line too long (121 > 100)
+    --> backend/notebooks/utils.py:1866:101
+     |
+1864 |     diagnostics = ranked.head(top_candidate_count).copy()
+1865 |     diagnostics["selected"] = diagnostics["candidate_rank"] == 1
+1866 |     diagnostics["selection_reason"] = np.where(diagnostics["selected"], selection_reason, "top candidate for comparison")
+     |                                                                                                     ^^^^^^^^^^^^^^^^^^^^^
+1867 |     diagnostics["active_devices"] = diagnostics["active_devices"].map(lambda devices: ",".join(str(device) for device in devices))
+1868 |     return selected, diagnostics
+     |
+
+E501 Line too long (130 > 100)
+    --> backend/notebooks/utils.py:1867:101
+     |
+1865 |     diagnostics["selected"] = diagnostics["candidate_rank"] == 1
+1866 |     diagnostics["selection_reason"] = np.where(diagnostics["selected"], selection_reason, "top candidate for comparison")
+1867 |     diagnostics["active_devices"] = diagnostics["active_devices"].map(lambda devices: ",".join(str(device) for device in devices))
+     |                                                                                                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+1868 |     return selected, diagnostics
+     |
+
+PLR2004 Magic value used in comparison, consider replacing `2` with a constant variable
+    --> backend/notebooks/utils.py:1890:29
+     |
+1888 |             start_time=start_time.to_pydatetime(),
+1889 |             device_1_on=int(1 in active_devices),
+1890 |             device_2_on=int(2 in active_devices),
+     |                             ^
+1891 |             device_3_on=int(3 in active_devices),
+1892 |             device_4_on=int(4 in active_devices),
+     |
+
+PLR2004 Magic value used in comparison, consider replacing `3` with a constant variable
+    --> backend/notebooks/utils.py:1891:29
+     |
+1889 |             device_1_on=int(1 in active_devices),
+1890 |             device_2_on=int(2 in active_devices),
+1891 |             device_3_on=int(3 in active_devices),
+     |                             ^
+1892 |             device_4_on=int(4 in active_devices),
+1893 |             target_temp=float(target_temp),
+     |
+
+PLR2004 Magic value used in comparison, consider replacing `4` with a constant variable
+    --> backend/notebooks/utils.py:1892:29
+     |
+1890 |             device_2_on=int(2 in active_devices),
+1891 |             device_3_on=int(3 in active_devices),
+1892 |             device_4_on=int(4 in active_devices),
+     |                             ^
+1893 |             target_temp=float(target_temp),
+1894 |             predicted_temp_at_start=float(selected_candidate["predicted_temp_at_start"]),
+     |
+
+PLR2004 Magic value used in comparison, consider replacing `4` with a constant variable
+    --> backend/notebooks/utils.py:1937:28
+     |
+1935 |     """
+1936 |     config.validate()
+1937 |     if expected_devices != 4:
+     |                            ^
+1938 |         raise ValueError("schedule formatting currently requires expected_devices=4.")
+1939 |     if max_simultaneous_devices < 0 or max_simultaneous_devices > expected_devices:
+     |
+
+E501 Line too long (112 > 100)
+    --> backend/notebooks/utils.py:1952:101
+     |
+1950 |     windows = consolidate_event_windows(events_df, merge_threshold_minutes=merge_threshold_minutes)
+1951 |     if not windows:
+1952 |         return pd.DataFrame(columns=SCHEDULE_OUTPUT_COLUMNS), pd.DataFrame(columns=CANDIDATE_DIAGNOSTIC_COLUMNS)
+     |                                                                                                     ^^^^^^^^^^^^
+1953 |
+1954 |     target_temp = config.min_temp if config.mode == "heating" else config.max_temp
+     |
+
+E501 Line too long (112 > 100)
+    --> backend/notebooks/utils.py:1973:101
+     |
+1971 |             expected_devices=expected_devices,
+1972 |         )
+1973 |         selected, diagnostics = select_best_event_candidate(candidates, top_candidate_count=top_candidate_count)
+     |                                                                                                     ^^^^^^^^^^^^
+1974 |         schedule_rows.extend(_schedule_rows_for_window(window, selected, config.mode, target_temp, expected_devices))
+     |
+
+E501 Line too long (117 > 100)
+    --> backend/notebooks/utils.py:1974:101
+     |
+1972 |         )
+1973 |         selected, diagnostics = select_best_event_candidate(candidates, top_candidate_count=top_candidate_count)
+1974 |         schedule_rows.extend(_schedule_rows_for_window(window, selected, config.mode, target_temp, expected_devices))
+     |                                                                                                     ^^^^^^^^^^^^^^^^^
+1975 |
+1976 |         diagnostics = diagnostics.copy()
+     |
+
+E501 Line too long (105 > 100)
+    --> backend/notebooks/utils.py:1988:101
+     |
+1986 |     schedule_df = schedule_df[schedule_order]
+1987 |
+1988 |     diagnostics_df = pd.concat(diagnostic_rows, ignore_index=True) if diagnostic_rows else pd.DataFrame()
+     |                                                                                                     ^^^^^
+1989 |     diagnostic_order = CANDIDATE_DIAGNOSTIC_COLUMNS + [
+1990 |         col for col in diagnostics_df.columns if col not in CANDIDATE_DIAGNOSTIC_COLUMNS and not col.startswith("_")
+     |
+
+E501 Line too long (116 > 100)
+    --> backend/notebooks/utils.py:1990:101
+     |
+1988 |     diagnostics_df = pd.concat(diagnostic_rows, ignore_index=True) if diagnostic_rows else pd.DataFrame()
+1989 |     diagnostic_order = CANDIDATE_DIAGNOSTIC_COLUMNS + [
+1990 |         col for col in diagnostics_df.columns if col not in CANDIDATE_DIAGNOSTIC_COLUMNS and not col.startswith("_")
+     |                                                                                                     ^^^^^^^^^^^^^^^^
+1991 |     ]
+1992 |     diagnostics_df = diagnostics_df[diagnostic_order]
+     |
+
+E501 Line too long (102 > 100)
+    --> backend/notebooks/utils.py:2006:101
+     |
+2004 |     missing = [col for col in SCHEDULE_OUTPUT_COLUMNS if col not in schedule_df.columns]
+2005 |     if missing:
+2006 |         raise ValueError(f"schedule_df missing required output columns before persistence: {missing}")
+     |                                                                                                     ^^
+2007 |
+2008 |     if report_name is None:
+     |
+
+Found 56 errors.
+[*] 3 fixable with the `--fix` option (3 hidden fixes can be enabled with the `--unsafe-fixes` option).

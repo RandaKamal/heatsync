@@ -1,3 +1,5 @@
+from typing import Any, cast
+
 import pandas as pd
 import pytest
 
@@ -197,8 +199,8 @@ def test_augmented_report_preserves_edge_case_rows_and_statuses() -> None:
     assert report.set_index("event_id").loc["E_missed", "report_status"] == "comfort_missed"
     assert report.set_index("event_id").loc["E_negative", "report_status"] == "negative_savings"
     assert report.set_index("event_id").loc["E_neutral", "report_status"] == "neutral_savings"
-    assert report.set_index("event_id").loc["E_negative", "energy_savings_kwh"] < 0.0
-    assert report.set_index("event_id").loc["E_neutral", "energy_savings_kwh"] == pytest.approx(0.0)
+    assert float(cast(Any, report.set_index("event_id").loc["E_negative", "energy_savings_kwh"])) < 0.0
+    assert float(cast(Any, report.set_index("event_id").loc["E_neutral", "energy_savings_kwh"])) == pytest.approx(0.0)
 
 
 def test_reporting_helpers_reject_malformed_inputs() -> None:
@@ -247,9 +249,7 @@ def test_leakage_free_event_control() -> None:
     event_start = pd.Timestamp("2026-03-30 03:00:00")
     event_end = pd.Timestamp("2026-03-30 04:00:00")
 
-    events_df = pd.DataFrame([
-        {"event_id": "E1", "starts_at": event_start, "ends_at": event_end}
-    ])
+    events_df = pd.DataFrame([{"event_id": "E1", "starts_at": event_start, "ends_at": event_end}])
 
     # We train a thermal model on past data
     train_df = pd.DataFrame(
@@ -268,7 +268,7 @@ def test_leakage_free_event_control() -> None:
         "expected_devices": 4,
         "device_params": {
             f"device_{i}": {"active_power": 2.0, "standby_power": 0.1} for i in range(1, 5)
-        }
+        },
     }
 
     config = EventControlConfig(
@@ -282,15 +282,16 @@ def test_leakage_free_event_control() -> None:
     cutoff_time = pd.Timestamp("2026-03-30 01:00:00")
 
     class LeakageGuardDataFrame(pd.DataFrame):
-        def __init__(self, *args, **kwargs):
+        def __init__(self, *args: Any, **kwargs: Any) -> None:
             super().__init__(*args, **kwargs)
             self._cutoff_time = cutoff_time
 
         @property
-        def loc(self):
+        def loc(self) -> Any:
             parent = self
+
             class GuardedLoc:
-                def __getitem__(self, key):
+                def __getitem__(self, key: Any) -> Any:
                     if isinstance(key, tuple):
                         ts, col = key
                     else:
@@ -300,11 +301,11 @@ def test_leakage_free_event_control() -> None:
                     has_cutoff = parent._cutoff_time is not None
                     if is_power_col and has_cutoff and pd.Timestamp(ts) >= parent._cutoff_time:
                         msg = (
-                            f"Leakage Guard: Accessed {col} at {ts} "
-                            f">= cutoff {parent._cutoff_time}"
+                            f"Leakage Guard: Accessed {col} at {ts} >= cutoff {parent._cutoff_time}"
                         )
                         raise ValueError(msg)
-                    return super(pd.DataFrame, parent).loc[key]
+                    return pd.DataFrame.loc.__get__(parent)[key]
+
             return GuardedLoc()
 
     df_guarded = LeakageGuardDataFrame(train_df)
@@ -326,4 +327,3 @@ def test_leakage_free_event_control() -> None:
     # Now verify that the guard indeed works by explicitly triggering it (a sanity check)
     with pytest.raises(ValueError, match="Leakage Guard"):
         _ = df_guarded.loc[pd.Timestamp("2026-03-30 01:15:00"), "room_power_kw"]
-

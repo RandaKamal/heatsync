@@ -59,7 +59,7 @@ def test_notebook_reload_path() -> None:
     artifacts_root = os.path.abspath(
         os.path.join(NOTEBOOKS_DIR, "..", "artifacts", "event_device_control")
     )
-    
+
     expected_models = [
         "heating_thermal_model.joblib",
         "heating_scaler.joblib",
@@ -78,11 +78,11 @@ def test_notebook_reload_path() -> None:
         "cooling_event_control_results.csv",
         "cooling_validation_timeseries.csv",
     ]
-    
+
     for model_file in expected_models:
         path = os.path.join(artifacts_root, "models", model_file)
         assert os.path.exists(path), f"Expected model artifact missing: {path}"
-        
+
     for report_file in expected_reports:
         path = os.path.join(artifacts_root, "reports", report_file)
         assert os.path.exists(path), f"Expected report artifact missing: {path}"
