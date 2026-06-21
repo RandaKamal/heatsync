@@ -26,6 +26,10 @@ from notebooks.utils import (
     train_device_power_model,
     train_thermal_model,
     validate_columns,
+    generate_device_subsets,
+    get_historical_value,
+    simulate_preconditioning,
+    simulate_all_candidates,
 )
 
 EXPECTED_ALIGNED_ROWS_WITH_LONG_GAP = 8
@@ -829,6 +833,115 @@ def test_consolidate_event_windows() -> None:
     df_bad = pd.DataFrame({"starts_at": ["2026-03-30 08:00:00"]})
     with pytest.raises(ValueError, match="Missing required column"):
         consolidate_event_windows(df_bad)
+
+
+def test_event_candidate_simulation() -> None:
+    from datetime import datetime
+    
+    # 1. Test generate_device_subsets
+    subsets = generate_device_subsets(expected_devices=4, max_simultaneous_devices=2)
+    assert len(subsets) == 11
+    assert () in subsets
+    assert (1, 2) in subsets
+    assert (1, 2, 3) not in subsets
+    
+    with pytest.raises(ValueError, match="expected_devices must be positive"):
+        generate_device_subsets(expected_devices=0, max_simultaneous_devices=2)
+    with pytest.raises(ValueError, match="max_simultaneous_devices must be between 0 and expected_devices"):
+        generate_device_subsets(expected_devices=4, max_simultaneous_devices=5)
+        
+    # 2. Test get_historical_value
+    times = pd.date_range("2026-03-30 00:00:00", periods=5, freq="15min")
+    df = pd.DataFrame({"outside_temperature": [10.0, 11.0, 12.0, 13.0, 14.0]}, index=times)
+    assert get_historical_value(df, "outside_temperature", pd.Timestamp("2026-03-30 00:15:00"), 0.0) == 11.0
+    assert get_historical_value(df, "outside_temperature", pd.Timestamp("2026-03-30 00:05:00"), 0.0) == 10.0
+    assert get_historical_value(df, "non_existent", pd.Timestamp("2026-03-30 00:00:00"), 99.0) == 99.0
+
+    # 3. Simulate preconditioning
+    idx = pd.date_range("2026-03-30 00:00:00", periods=10, freq="15min")
+    train_df = pd.DataFrame({
+        "room_temp": [20.0] * 10,
+        "outside_temperature": [10.0] * 10,
+        "room_power_kw": [4.0] * 10,
+        "event_active": [0.0] * 10,
+    }, index=idx)
+    thermal_model = train_thermal_model(train_df, "heating", pd.Timestamp("2026-03-30 02:00:00"))
+    
+    device_power_model = {
+        "season": "heating",
+        "expected_devices": 4,
+        "device_params": {
+            f"device_{i}": {"active_power": 2.0, "standby_power": 0.1} for i in range(1, 5)
+        }
+    }
+    
+    res = simulate_preconditioning(
+        df=train_df,
+        thermal_model_dict=thermal_model,
+        device_power_model_dict=device_power_model,
+        starts_at=datetime(2026, 3, 30, 1, 0, 0),
+        offset_minutes=30,
+        active_devices=[1, 2],
+        electricity_price=0.15,
+        co2_factor=0.4,
+        comfort_min=18.0,
+        comfort_max=22.0,
+        expected_devices=4
+    )
+    
+    assert "predicted_temp_at_start" in res
+    assert res["expected_kwh"] == pytest.approx(2.1)
+    assert res["expected_cost"] == pytest.approx(2.1 * 0.15)
+    assert res["expected_co2"] == pytest.approx(2.1 * 0.4)
+    assert "violation_celsius" in res
+    assert "is_feasible" in res
+    
+    # 4. Negative values / failures
+    with pytest.raises(ValueError, match="offset_minutes must be non-negative"):
+        simulate_preconditioning(
+            df=train_df,
+            thermal_model_dict=thermal_model,
+            device_power_model_dict=device_power_model,
+            starts_at=datetime(2026, 3, 30, 1, 0, 0),
+            offset_minutes=-15,
+            active_devices=[1, 2],
+            electricity_price=0.15,
+            co2_factor=0.4,
+            comfort_min=18.0,
+            comfort_max=22.0
+        )
+        
+    with pytest.raises(ValueError, match="offset_minutes must be a multiple of 15"):
+        simulate_preconditioning(
+            df=train_df,
+            thermal_model_dict=thermal_model,
+            device_power_model_dict=device_power_model,
+            starts_at=datetime(2026, 3, 30, 1, 0, 0),
+            offset_minutes=10,
+            active_devices=[1, 2],
+            electricity_price=0.15,
+            co2_factor=0.4,
+            comfort_min=18.0,
+            comfort_max=22.0
+        )
+
+    # 5. Simulate all candidates
+    candidates = simulate_all_candidates(
+        df=train_df,
+        thermal_model_dict=thermal_model,
+        device_power_model_dict=device_power_model,
+        starts_at=datetime(2026, 3, 30, 1, 0, 0),
+        ends_at=datetime(2026, 3, 30, 2, 0, 0),
+        candidate_offsets=[0, 15, 30],
+        max_simultaneous_devices=2,
+        electricity_price=0.15,
+        co2_factor=0.4,
+        comfort_min=18.0,
+        comfort_max=22.0,
+        expected_devices=4
+    )
+    assert len(candidates) == 33
+
 
 
 

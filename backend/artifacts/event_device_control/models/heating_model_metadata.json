@@ -1,0 +1,44 @@
+{
+  "season": "heating",
+  "train_timestamps": {
+    "split": "2026-04-03 00:00:00"
+  },
+  "coefficients": {
+    "a": 0.9803338849620291,
+    "b": -0.0032328210864004904,
+    "c_heat": 0.00025654458857436523,
+    "c_cool": 0.0,
+    "d": 0.11194050706613971,
+    "intercept": 0.2990985214887374
+  },
+  "is_fallback": false,
+  "fallback_reason": null,
+  "metrics": {
+    "mae": 0.12081943507146005,
+    "rmse": 0.1534259945963435
+  },
+  "features": [
+    "room_temp",
+    "outside_temperature",
+    "room_power_kw",
+    "event_active"
+  ],
+  "device_power_model_params": {
+    "device_1": {
+      "active_power": 17.720286738351255,
+      "standby_power": 1.171206349206349
+    },
+    "device_2": {
+      "active_power": 4.6875,
+      "standby_power": 1.1575952380952381
+    },
+    "device_3": {
+      "active_power": 3.944870689655172,
+      "standby_power": 1.1710964912280701
+    },
+    "device_4": {
+      "active_power": 5.690139720558881,
+      "standby_power": 1.1972
+    }
+  }
+}

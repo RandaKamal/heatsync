@@ -6,10 +6,12 @@ import logging
 import pathlib
 import warnings
 import json
+import itertools
 from typing import Any
 from dataclasses import dataclass, asdict, field
 from datetime import datetime
 
+import numpy as np
 import joblib
 import pandas as pd
 from sklearn.linear_model import Ridge
@@ -1260,5 +1262,174 @@ def consolidate_event_windows(
         ))
         
     return result
+
+
+def generate_device_subsets(expected_devices: int, max_simultaneous_devices: int) -> list[tuple[int, ...]]:
+    """
+    Generate all valid active device subsets subject to max simultaneous devices constraints.
+    """
+    if expected_devices <= 0:
+        raise ValueError("expected_devices must be positive.")
+    if max_simultaneous_devices < 0 or max_simultaneous_devices > expected_devices:
+        raise ValueError("max_simultaneous_devices must be between 0 and expected_devices.")
+        
+    subsets = []
+    for r in range(0, max_simultaneous_devices + 1):
+        for combo in itertools.combinations(range(1, expected_devices + 1), r):
+            subsets.append(combo)
+    return subsets
+
+
+def get_historical_value(df: pd.DataFrame, col: str, ts: pd.Timestamp, default: float) -> float:
+    """
+    Look up a value in a DataFrame column by timestamp.
+    If the exact timestamp is missing or is NaN, finds the nearest non-NaN timestamp.
+    """
+    if col not in df.columns or df.empty:
+        return default
+    if ts in df.index:
+        val = df.loc[ts, col]
+        if isinstance(val, pd.Series):
+            val = val.iloc[0]
+        if not pd.isna(val):
+            return float(val)
+    # Find closest timestamp
+    closest_idx = np.abs(df.index - ts).argmin()
+    val = df.iloc[closest_idx][col]
+    if not pd.isna(val):
+        return float(val)
+    return default
+
+
+def simulate_preconditioning(
+    df: pd.DataFrame,
+    thermal_model_dict: dict[str, Any],
+    device_power_model_dict: dict[str, Any],
+    starts_at: datetime,
+    offset_minutes: int,
+    active_devices: list[int],
+    electricity_price: float,
+    co2_factor: float,
+    comfort_min: float,
+    comfort_max: float,
+    expected_devices: int = 4,
+) -> dict[str, Any]:
+    """
+    Simulate a candidate preconditioning schedule for a single event.
+    """
+    if offset_minutes < 0:
+        raise ValueError("offset_minutes must be non-negative.")
+    if offset_minutes % 15 != 0:
+        raise ValueError("offset_minutes must be a multiple of 15.")
+        
+    ts_start = pd.Timestamp(starts_at)
+    ts_precond_start = ts_start - pd.Timedelta(minutes=offset_minutes)
+    
+    # Initial temperature at preconditioning start time
+    current_temp = get_historical_value(df, "room_temp", ts_precond_start, 20.0)
+    
+    device_params = device_power_model_dict.get("device_params", {})
+    
+    # Calculate step power
+    step_power_kw = 0.0
+    for j in range(1, expected_devices + 1):
+        params = device_params.get(f"device_{j}", {})
+        p_active = params.get("active_power", 3.0)
+        p_standby = params.get("standby_power", 0.05)
+        if j in active_devices:
+            step_power_kw += p_active
+        else:
+            step_power_kw += p_standby
+            
+    num_steps = offset_minutes // 15
+    total_kwh = 0.0
+    
+    for step in range(num_steps):
+        t_step = ts_precond_start + pd.Timedelta(minutes=15 * step)
+        
+        # Accumulate energy
+        total_kwh += step_power_kw * 0.25
+        
+        # Build features for prediction
+        step_data = {}
+        for feat in thermal_model_dict.get("features", []):
+            if feat == "room_temp":
+                step_data["room_temp"] = current_temp
+            elif feat == "room_power_kw":
+                step_data["room_power_kw"] = step_power_kw
+            elif feat == "event_active":
+                step_data["event_active"] = 0.0
+            else:
+                step_data[feat] = get_historical_value(df, feat, t_step, 0.0)
+                
+        # If the features list is empty (fallback model might not list features properly)
+        if not step_data:
+            step_data["room_temp"] = current_temp
+            
+        step_df = pd.DataFrame([step_data], index=[t_step])
+        next_temp = predict_temperature(thermal_model_dict, step_df).iloc[0]
+        current_temp = next_temp
+        
+    expected_cost = total_kwh * electricity_price
+    expected_co2 = total_kwh * co2_factor
+    
+    # Comfort violation
+    violation_celsius = max(0.0, comfort_min - current_temp) + max(0.0, current_temp - comfort_max)
+    is_feasible = (violation_celsius <= 1e-9)
+    
+    return {
+        "predicted_temp_at_start": current_temp,
+        "expected_kwh": total_kwh,
+        "expected_cost": expected_cost,
+        "expected_co2": expected_co2,
+        "violation_celsius": violation_celsius,
+        "is_feasible": is_feasible,
+    }
+
+
+def simulate_all_candidates(
+    df: pd.DataFrame,
+    thermal_model_dict: dict[str, Any],
+    device_power_model_dict: dict[str, Any],
+    starts_at: datetime,
+    ends_at: datetime,
+    candidate_offsets: list[int],
+    max_simultaneous_devices: int,
+    electricity_price: float,
+    co2_factor: float,
+    comfort_min: float,
+    comfort_max: float,
+    expected_devices: int = 4,
+) -> list[dict[str, Any]]:
+    """
+    Generate and simulate all candidate schedules for a single event window.
+    """
+    device_subsets = generate_device_subsets(expected_devices, max_simultaneous_devices)
+    candidates = []
+    for offset in candidate_offsets:
+        for devices in device_subsets:
+            # Run simulation
+            res = simulate_preconditioning(
+                df=df,
+                thermal_model_dict=thermal_model_dict,
+                device_power_model_dict=device_power_model_dict,
+                starts_at=starts_at,
+                offset_minutes=offset,
+                active_devices=list(devices),
+                electricity_price=electricity_price,
+                co2_factor=co2_factor,
+                comfort_min=comfort_min,
+                comfort_max=comfort_max,
+                expected_devices=expected_devices,
+            )
+            # Add metadata to result
+            res.update({
+                "offset_minutes": offset,
+                "active_devices": devices,
+                "active_device_count": len(devices),
+            })
+            candidates.append(res)
+    return candidates
+
 
 
