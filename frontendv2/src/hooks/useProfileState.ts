@@ -241,11 +241,7 @@ export function useProfileState() {
   }, [])
 
   const importSchedule = useCallback(() => {
-    setState((prev) => ({ ...prev, scheduleImported: true, wizardStep: 'scheduling' }))
-  }, [])
-
-  const commissionUnits = useCallback(() => {
-    setState((prev) => ({ ...prev, wizardStep: 'commissioned' }))
+    setState((prev) => ({ ...prev, scheduleImported: true, wizardStep: 'commissioned' }))
   }, [])
 
   const backToSelection = useCallback(() => {
@@ -267,7 +263,6 @@ export function useProfileState() {
     skipToComplete,
     confirmProfile,
     importSchedule,
-    commissionUnits,
     backToSelection,
   }
 }

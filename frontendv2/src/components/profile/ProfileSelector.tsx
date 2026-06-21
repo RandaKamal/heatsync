@@ -16,7 +16,6 @@ function ProfileCard({ profile, isActive, onUse }: ProfileCardProps) {
     >
       <span className="bp-profile-card__emoji">{profile.icon}</span>
       <span className="bp-profile-card__name">{profile.name}</span>
-      <span className="bp-profile-card__desc">{profile.description}</span>
       <span className="bp-use-btn">Use Profile</span>
     </button>
   )

@@ -53,3 +53,35 @@ Recorded when cleaning the 3-D scene to use only backend-provided data.
 /api/comfort/holidays       → upcoming Bayern Feiertage
 /api/devices/<id>/snapshots → room temperature, humidity, CO2, supply/return temps (historical)
 /api/devices/<id>/power     → 5-min power draw time series
+
+── UI SIMPLIFICATION PASS (2026-06-21) ───────────────────────────────────────
+Recorded when streamlining the Building Profile wizard and view-specific controls.
+
+- Profile card description text on the Building Profile selection screen
+  (ProfileSelector) — cards now show icon + name only.
+- "Thermal behaviour" section in Site Parameters (ProfileDetailsPanel) —
+  thermal_time_constant, heat_retention, heating/cooling rate, and the
+  advanced envelope/capacity/efficiency indices. These are set automatically
+  by the Site Calibration flow, so manual inputs were redundant.
+- Air leakage / Thermal mass fields (Building section), Maximum occupancy /
+  Sensible heat gain / Door opening intensity (Occupancy section), and
+  Cooling comfort min/max / Humidity min/max / CO2 warning (Comfort section)
+  in Site Parameters — kept the panel to floor area, volume, insulation,
+  typical occupancy, activity type, and heating comfort range.
+- "Commission Heat Pumps" button (CalibrationPanel/BuildingProfilePage) —
+  heat pumps now render in the 3-D view as soon as a profile is selected
+  (ProfileBuildingCanvas showDevices is no longer gated on a wizard step).
+  Importing a schedule now advances the wizard straight to the
+  "commissioned" / Fleet Learning Card state.
+  - WizardStep no longer has a 'scheduling' value; commissionUnits() removed
+    from useProfileState.
+- "Fault Log" top-bar button (service view) — removed; the Technician
+  button is now customer-view only (it lets the customer alert the
+  technician about anomalies). The service view instead gets a
+  "🔔 Notifications" button (TopBar) and a relabelled sidebar shortcut
+  (ServiceSidebar "Notifications", was "Full log") that both open
+  TechnicianPanel in mode="service" — a read-only log of requests the
+  customer has sent, with no "Active alerts" tab / Alert Technician action.
+- "Room condition" legend panel (top-left of the customer-view map,
+  App.tsx `.map-legend`) — removed along with the now-unused
+  `legendStatuses` constant.

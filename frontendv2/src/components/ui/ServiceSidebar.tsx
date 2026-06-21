@@ -479,7 +479,7 @@ export function ServiceSidebar({
               <h3>Detected patterns</h3>
             </div>
             <button type="button" className="topbar-btn" style={{ padding: '4px 10px', fontSize: 11 }} onClick={onTechnicianClick}>
-              Full log
+              Notifications
             </button>
           </div>
           {scenarios.map((sc) => (

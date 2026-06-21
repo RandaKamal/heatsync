@@ -74,7 +74,7 @@ export interface CalibrationState {
   paused: boolean
 }
 
-export type WizardStep = 'selecting' | 'calibrating' | 'scheduling' | 'commissioned'
+export type WizardStep = 'selecting' | 'calibrating' | 'commissioned'
 
 export interface ProfileState {
   activeProfileId: string

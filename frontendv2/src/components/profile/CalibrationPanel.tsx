@@ -1,4 +1,4 @@
-import type { CalibrationState, CalibrationStage, ThermalParameters, WizardStep } from '../../types/buildingProfile'
+import type { CalibrationState, CalibrationStage, ThermalParameters } from '../../types/buildingProfile'
 import type { BuildingProfile } from '../../types/buildingProfile'
 import { STAGE_LABELS, STAGE_DESCRIPTIONS } from '../../utils/profileCalibration'
 import { CALIBRATION_ADJUSTMENTS } from '../../data/buildingProfiles'
@@ -53,9 +53,6 @@ interface CalibrationPanelProps {
   onRestart: () => void
   onSkip: () => void
   onImportSchedule: () => void
-  onCommission: () => void
-  scheduleImported: boolean
-  wizardStep: WizardStep
 }
 
 export function CalibrationPanel({
@@ -67,9 +64,6 @@ export function CalibrationPanel({
   onRestart,
   onSkip,
   onImportSchedule,
-  onCommission,
-  scheduleImported,
-  wizardStep,
 }: CalibrationPanelProps) {
   const { stage, progressPercent, paused } = calibration
   const isNotStarted = stage === 'not-started'
@@ -86,14 +80,6 @@ export function CalibrationPanel({
   // Live parameter animation during parameter-fitting (progress 75→100)
   const showLiveParams = stage === 'parameter-fitting' && progressPercent >= 75
   const lerpT = showLiveParams ? Math.min(1, (progressPercent - 75) / 25) : 0
-
-  // Demo schedule events from roomEvents
-  const demoEvents = [
-    { time: '07:00', title: 'Thermodynamics', room: 'G01' },
-    { time: '07:15', title: 'Project Seminar', room: 'F01' },
-    { time: '08:00', title: 'Flight Systems', room: 'G02' },
-    { time: '08:30', title: 'Aerospace Design', room: 'F02' },
-  ]
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
@@ -218,11 +204,7 @@ export function CalibrationPanel({
             confidencePercent={calibration.confidencePercent}
           />
 
-          {!scheduleImported ? (
-            <ScheduleImportPicker onImport={onImportSchedule} />
-          ) : (
-            <ScheduleImported events={demoEvents} onCommission={onCommission} wizardStep={wizardStep} />
-          )}
+          <ScheduleImportPicker onImport={onImportSchedule} />
         </>
       )}
     </div>
@@ -258,53 +240,6 @@ function ScheduleImportPicker({ onImport }: { onImport: () => void }) {
             Import selected schedule
           </button>
         </div>
-      </div>
-    </div>
-  )
-}
-
-// ── Imported schedule + commission button ─────────────────────────────────────
-
-interface EventRow {
-  time: string
-  title: string
-  room: string
-}
-
-function ScheduleImported({
-  events,
-  onCommission,
-  wizardStep,
-}: {
-  events: EventRow[]
-  onCommission: () => void
-  wizardStep: WizardStep
-}) {
-  return (
-    <div className="glass-panel" style={{ borderRadius: 12, overflow: 'hidden' }}>
-      <div style={{ padding: '12px 14px', borderBottom: '1px solid var(--border)' }}>
-        <span className="section-eyebrow">Schedule imported ({events.length} events)</span>
-      </div>
-      <div style={{ padding: '10px 14px' }}>
-        <div className="bp-schedule-events">
-          {events.map((ev) => (
-            <div key={ev.room + ev.time} className="bp-event-row">
-              <span style={{ color: 'var(--muted)' }}>{ev.time}</span>
-              <span style={{ color: '#dceaf3', flex: 1, marginLeft: 10 }}>{ev.title}</span>
-              <span style={{ color: 'var(--cyan)', fontWeight: 700 }}>{ev.room}</span>
-            </div>
-          ))}
-        </div>
-        {wizardStep !== 'commissioned' && (
-          <button
-            type="button"
-            className="bp-commission-btn"
-            style={{ marginTop: 14 }}
-            onClick={onCommission}
-          >
-            ⚡ Commission Heat Pumps
-          </button>
-        )}
       </div>
     </div>
   )

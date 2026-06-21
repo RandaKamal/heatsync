@@ -4,7 +4,6 @@ import { ProfileDetailsPanel } from './ProfileDetailsPanel'
 import { CalibrationPanel } from './CalibrationPanel'
 import { FleetLearningCard } from './FleetLearningCard'
 import { ProfileBuildingCanvas } from './ProfileBuildingCanvas'
-import { CALIBRATION_ADJUSTMENTS } from '../../data/buildingProfiles'
 
 export function BuildingProfilePage() {
   const {
@@ -19,11 +18,10 @@ export function BuildingProfilePage() {
     skipToComplete,
     confirmProfile,
     importSchedule,
-    commissionUnits,
     backToSelection,
   } = useProfileState()
 
-  const { wizardStep, scheduleImported } = state
+  const { wizardStep } = state
   const calibrationDone = state.calibration.stage === 'ready'
   const isCalibrating = !calibrationDone && state.calibration.stage !== 'not-started' && !state.calibration.paused
 
@@ -38,12 +36,8 @@ export function BuildingProfilePage() {
     )
   }
 
-  // Steps 2-4: 3-panel layout
-  const showDevices = wizardStep === 'commissioned'
-
-  // Determine which params changed after calibration
-  const adjustments = CALIBRATION_ADJUSTMENTS[state.activeProfileId] ?? {}
-  const refinedKeys = calibrationDone ? new Set(Object.keys(adjustments)) : new Set<string>()
+  // Heat pumps are visible as soon as a profile is selected — no separate commissioning step needed
+  const showDevices = true
 
   return (
     <div className="bp-3panel">
@@ -69,9 +63,6 @@ export function BuildingProfilePage() {
             onRestart={restartCalibration}
             onSkip={skipToComplete}
             onImportSchedule={importSchedule}
-            onCommission={commissionUnits}
-            scheduleImported={scheduleImported}
-            wizardStep={wizardStep}
           />
         )}
       </div>
@@ -96,13 +87,11 @@ export function BuildingProfilePage() {
 
         <ProfileDetailsPanel
           building={state.siteValues.building}
-          thermal={state.siteValues.thermal}
           occupancy={state.siteValues.occupancy}
           comfort={state.siteValues.comfort}
           onUpdate={updateSiteValues}
           onReset={resetToArchetype}
           readOnly={isCalibrating}
-          refinedKeys={refinedKeys}
           showActions={!isCalibrating}
         />
       </div>

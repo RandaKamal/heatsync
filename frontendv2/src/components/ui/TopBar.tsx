@@ -7,6 +7,7 @@ interface TopBarProps {
   onOptimizeClick: () => void
   onTechnicianClick: () => void
   alertCount: number
+  notificationCount: number
   backendConnected: boolean
 }
 
@@ -17,6 +18,7 @@ export function TopBar({
   onOptimizeClick,
   onTechnicianClick,
   alertCount,
+  notificationCount,
   backendConnected,
 }: TopBarProps) {
   return (
@@ -65,24 +67,26 @@ export function TopBar({
               <span>⚡</span> Optimize Schedule
             </button>
           )}
-          {view === 'service' && (
+          {view === 'customer' && (
             <button
               type="button"
               className={`topbar-btn topbar-btn--tech ${alertCount > 0 ? 'topbar-btn--alert' : ''}`}
               onClick={onTechnicianClick}
             >
-              <span>🔧</span> Fault Log
+              <span>🔧</span> Technician
               {alertCount > 0 && <span className="topbar-alert-dot">{alertCount}</span>}
             </button>
           )}
-          <button
-            type="button"
-            className={`topbar-btn topbar-btn--tech ${alertCount > 0 ? 'topbar-btn--alert' : ''}`}
-            onClick={onTechnicianClick}
-          >
-            <span>🔧</span> Technician
-            {alertCount > 0 && <span className="topbar-alert-dot">{alertCount}</span>}
-          </button>
+          {view === 'service' && (
+            <button
+              type="button"
+              className={`topbar-btn topbar-btn--tech ${notificationCount > 0 ? 'topbar-btn--alert' : ''}`}
+              onClick={onTechnicianClick}
+            >
+              <span>🔔</span> Notifications
+              {notificationCount > 0 && <span className="topbar-alert-dot">{notificationCount}</span>}
+            </button>
+          )}
         </div>
       </div>
 

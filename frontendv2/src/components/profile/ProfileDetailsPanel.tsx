@@ -1,17 +1,13 @@
 import { useState } from 'react'
 import type {
   BuildingParameters,
-  ThermalParameters,
   OccupancyParameters,
   ComfortParameters,
   InsulationLevel,
-  AirLeakageLevel,
-  ThermalMassLevel,
   ActivityType,
 } from '../../types/buildingProfile'
 import {
   validateBuildingParams,
-  validateThermalParams,
   validateOccupancyParams,
   validateComfortParams,
 } from '../../utils/profileValidation'
@@ -59,27 +55,21 @@ function Field({ id, label, error, children }: FieldProps) {
 
 interface ProfileDetailsPanelProps {
   building: BuildingParameters
-  thermal: ThermalParameters
   occupancy: OccupancyParameters
   comfort: ComfortParameters
   onUpdate: (updates: {
     building?: Partial<BuildingParameters>
-    thermal?: Partial<ThermalParameters>
     occupancy?: Partial<OccupancyParameters>
     comfort?: Partial<ComfortParameters>
   }) => void
   onReset: () => void
   /** When true, all inputs are disabled (during active calibration) */
   readOnly?: boolean
-  /** Set of thermal parameter keys that were refined during calibration */
-  refinedKeys?: Set<string>
   /** Whether to show Save/Reset action buttons */
   showActions?: boolean
 }
 
 const INSULATION_OPTIONS: InsulationLevel[] = ['low', 'medium', 'medium-high', 'high']
-const AIR_LEAKAGE_OPTIONS: AirLeakageLevel[] = ['low', 'medium', 'high']
-const THERMAL_MASS_OPTIONS: ThermalMassLevel[] = ['low', 'medium', 'high']
 const ACTIVITY_LABELS: Record<ActivityType, string> = {
   seated: 'Seated (lectures, meetings)',
   light: 'Light (office work, standing)',
@@ -89,25 +79,19 @@ const ACTIVITY_LABELS: Record<ActivityType, string> = {
 
 export function ProfileDetailsPanel({
   building,
-  thermal,
   occupancy,
   comfort,
   onUpdate,
   onReset,
   readOnly = false,
-  refinedKeys = new Set(),
   showActions = true,
 }: ProfileDetailsPanelProps) {
-  const [showAdvanced, setShowAdvanced] = useState(false)
-
   const buildingErrors = validateBuildingParams(building)
-  const thermalErrors = validateThermalParams(thermal)
   const occupancyErrors = validateOccupancyParams(occupancy)
   const comfortErrors = validateComfortParams(comfort)
 
   const hasErrors =
     Object.keys(buildingErrors).length > 0 ||
-    Object.keys(thermalErrors).length > 0 ||
     Object.keys(occupancyErrors).length > 0 ||
     Object.keys(comfortErrors).length > 0
 
@@ -157,179 +141,10 @@ export function ProfileDetailsPanel({
               ))}
             </select>
           </Field>
-          <Field id="airLeakageLevel" label="Air leakage">
-            <select
-              id="airLeakageLevel"
-              className="bp-select"
-              value={building.airLeakageLevel}
-              onChange={(e) => onUpdate({ building: { airLeakageLevel: e.target.value as AirLeakageLevel } })}
-            >
-              {AIR_LEAKAGE_OPTIONS.map((opt) => (
-                <option key={opt} value={opt} style={{ textTransform: 'capitalize' }}>{opt}</option>
-              ))}
-            </select>
-          </Field>
-          <Field id="thermalMassLevel" label="Thermal mass">
-            <select
-              id="thermalMassLevel"
-              className="bp-select"
-              value={building.thermalMassLevel}
-              onChange={(e) => onUpdate({ building: { thermalMassLevel: e.target.value as ThermalMassLevel } })}
-            >
-              {THERMAL_MASS_OPTIONS.map((opt) => (
-                <option key={opt} value={opt} style={{ textTransform: 'capitalize' }}>{opt}</option>
-              ))}
-            </select>
-          </Field>
         </div>
       </CollapsibleSection>
 
-      {/* 2. Thermal behaviour */}
-      <CollapsibleSection title="Thermal behaviour">
-        <div className="bp-field-grid">
-          <Field
-            id="thermalTimeConstantHours"
-            label="Thermal time constant (h)"
-            error={thermalErrors.thermalTimeConstantHours}
-          >
-            <input
-              id="thermalTimeConstantHours"
-              type="number"
-              className="bp-input"
-              value={thermal.thermalTimeConstantHours}
-              step={0.1}
-              min={0.1}
-              title="The time for the building to reach 63% of a temperature change. Higher = slower response."
-              onChange={(e) => onUpdate({ thermal: { thermalTimeConstantHours: Number(e.target.value) } })}
-            />
-          </Field>
-          <Field
-            id="estimatedHeatRetentionHours"
-            label="Heat retention (h)"
-            error={thermalErrors.estimatedHeatRetentionHours}
-          >
-            <input
-              id="estimatedHeatRetentionHours"
-              type="number"
-              className="bp-input"
-              value={thermal.estimatedHeatRetentionHours}
-              step={0.1}
-              min={0.1}
-              title="Estimated time the building stays warm after heating stops."
-              onChange={(e) => onUpdate({ thermal: { estimatedHeatRetentionHours: Number(e.target.value) } })}
-            />
-          </Field>
-          <Field
-            id="heatingRateCPerHour"
-            label="Heating rate (°C/h)"
-            error={thermalErrors.heatingRateCPerHour}
-          >
-            <input
-              id="heatingRateCPerHour"
-              type="number"
-              className="bp-input"
-              value={thermal.heatingRateCPerHour}
-              step={0.1}
-              min={0.1}
-              onChange={(e) => onUpdate({ thermal: { heatingRateCPerHour: Number(e.target.value) } })}
-            />
-          </Field>
-          <Field
-            id="coolingRateCPerHour"
-            label="Cooling rate (°C/h)"
-            error={thermalErrors.coolingRateCPerHour}
-          >
-            <input
-              id="coolingRateCPerHour"
-              type="number"
-              className="bp-input"
-              value={thermal.coolingRateCPerHour}
-              step={0.1}
-              min={0.1}
-              onChange={(e) => onUpdate({ thermal: { coolingRateCPerHour: Number(e.target.value) } })}
-            />
-          </Field>
-        </div>
-
-        <button
-          type="button"
-          className="bp-advanced-toggle"
-          onClick={() => setShowAdvanced((v) => !v)}
-        >
-          {showAdvanced ? '▲ Hide' : '▼ Show'} advanced model parameters
-        </button>
-
-        {showAdvanced && (
-          <div className="bp-field-grid" style={{ marginTop: 10 }}>
-            <Field
-              id="envelopeResistanceIndex"
-              label="Envelope resistance index"
-              error={thermalErrors.envelopeResistanceIndex}
-            >
-              <input
-                id="envelopeResistanceIndex"
-                type="number"
-                className="bp-input"
-                value={thermal.envelopeResistanceIndex}
-                step={0.01}
-                min={0.01}
-                title="Normalised index (0–1) of how well the envelope resists heat flow."
-                onChange={(e) => onUpdate({ thermal: { envelopeResistanceIndex: Number(e.target.value) } })}
-              />
-            </Field>
-            <Field
-              id="effectiveThermalCapacityIndex"
-              label="Thermal capacity index"
-              error={thermalErrors.effectiveThermalCapacityIndex}
-            >
-              <input
-                id="effectiveThermalCapacityIndex"
-                type="number"
-                className="bp-input"
-                value={thermal.effectiveThermalCapacityIndex}
-                step={0.01}
-                min={0.01}
-                title="Normalised index (0–1) of the building's ability to store heat."
-                onChange={(e) => onUpdate({ thermal: { effectiveThermalCapacityIndex: Number(e.target.value) } })}
-              />
-            </Field>
-            <Field
-              id="heatingEfficiencyIndex"
-              label="Heating efficiency index"
-              error={thermalErrors.heatingEfficiencyIndex}
-            >
-              <input
-                id="heatingEfficiencyIndex"
-                type="number"
-                className="bp-input"
-                value={thermal.heatingEfficiencyIndex}
-                step={0.01}
-                min={0.01}
-                title="How effectively the HVAC system converts energy to useful heat (0–1)."
-                onChange={(e) => onUpdate({ thermal: { heatingEfficiencyIndex: Number(e.target.value) } })}
-              />
-            </Field>
-            <Field
-              id="coolingEfficiencyIndex"
-              label="Cooling efficiency index"
-              error={thermalErrors.coolingEfficiencyIndex}
-            >
-              <input
-                id="coolingEfficiencyIndex"
-                type="number"
-                className="bp-input"
-                value={thermal.coolingEfficiencyIndex}
-                step={0.01}
-                min={0.01}
-                title="How effectively the HVAC system removes heat (0–1)."
-                onChange={(e) => onUpdate({ thermal: { coolingEfficiencyIndex: Number(e.target.value) } })}
-              />
-            </Field>
-          </div>
-        )}
-      </CollapsibleSection>
-
-      {/* 3. Occupancy & activity */}
+      {/* 2. Occupancy & activity */}
       <CollapsibleSection title="Occupancy & activity">
         <div className="bp-field-grid">
           <Field
@@ -346,20 +161,6 @@ export function ProfileDetailsPanel({
               onChange={(e) => onUpdate({ occupancy: { typicalOccupancy: Number(e.target.value) } })}
             />
           </Field>
-          <Field
-            id="maximumOccupancy"
-            label="Maximum occupancy"
-            error={occupancyErrors.maximumOccupancy}
-          >
-            <input
-              id="maximumOccupancy"
-              type="number"
-              className="bp-input"
-              value={occupancy.maximumOccupancy}
-              min={1}
-              onChange={(e) => onUpdate({ occupancy: { maximumOccupancy: Number(e.target.value) } })}
-            />
-          </Field>
           <Field id="activityType" label="Activity type">
             <select
               id="activityType"
@@ -372,36 +173,10 @@ export function ProfileDetailsPanel({
               ))}
             </select>
           </Field>
-          <Field
-            id="sensibleHeatGainWPerPerson"
-            label="Sensible heat gain (W/person)"
-            error={occupancyErrors.sensibleHeatGainWPerPerson}
-          >
-            <input
-              id="sensibleHeatGainWPerPerson"
-              type="number"
-              className="bp-input"
-              value={occupancy.sensibleHeatGainWPerPerson}
-              min={1}
-              onChange={(e) => onUpdate({ occupancy: { sensibleHeatGainWPerPerson: Number(e.target.value) } })}
-            />
-          </Field>
-          <Field id="doorOpeningIntensity" label="Door opening intensity">
-            <select
-              id="doorOpeningIntensity"
-              className="bp-select"
-              value={occupancy.doorOpeningIntensity}
-              onChange={(e) => onUpdate({ occupancy: { doorOpeningIntensity: e.target.value as AirLeakageLevel } })}
-            >
-              {AIR_LEAKAGE_OPTIONS.map((opt) => (
-                <option key={opt} value={opt} style={{ textTransform: 'capitalize' }}>{opt}</option>
-              ))}
-            </select>
-          </Field>
         </div>
       </CollapsibleSection>
 
-      {/* 4. Comfort envelope */}
+      {/* 3. Comfort envelope */}
       <CollapsibleSection title="Comfort envelope">
         {/* Visual comfort band */}
         <div className="comfort-band" style={{ marginBottom: 16 }}>
@@ -451,58 +226,6 @@ export function ProfileDetailsPanel({
               value={comfort.heatingComfortMaxC}
               step={0.5}
               onChange={(e) => onUpdate({ comfort: { heatingComfortMaxC: Number(e.target.value) } })}
-            />
-          </Field>
-          <Field id="coolingComfortMinC" label="Cooling min (°C)" error={comfortErrors.coolingComfortMinC}>
-            <input
-              id="coolingComfortMinC"
-              type="number"
-              className="bp-input"
-              value={comfort.coolingComfortMinC}
-              step={0.5}
-              onChange={(e) => onUpdate({ comfort: { coolingComfortMinC: Number(e.target.value) } })}
-            />
-          </Field>
-          <Field id="coolingComfortMaxC" label="Cooling max (°C)">
-            <input
-              id="coolingComfortMaxC"
-              type="number"
-              className="bp-input"
-              value={comfort.coolingComfortMaxC}
-              step={0.5}
-              onChange={(e) => onUpdate({ comfort: { coolingComfortMaxC: Number(e.target.value) } })}
-            />
-          </Field>
-          <Field id="humidityMinPercent" label="Humidity min (%)" error={comfortErrors.humidityMinPercent}>
-            <input
-              id="humidityMinPercent"
-              type="number"
-              className="bp-input"
-              value={comfort.humidityMinPercent}
-              min={0}
-              max={100}
-              onChange={(e) => onUpdate({ comfort: { humidityMinPercent: Number(e.target.value) } })}
-            />
-          </Field>
-          <Field id="humidityMaxPercent" label="Humidity max (%)" error={comfortErrors.humidityMaxPercent}>
-            <input
-              id="humidityMaxPercent"
-              type="number"
-              className="bp-input"
-              value={comfort.humidityMaxPercent}
-              min={0}
-              max={100}
-              onChange={(e) => onUpdate({ comfort: { humidityMaxPercent: Number(e.target.value) } })}
-            />
-          </Field>
-          <Field id="co2WarningPpm" label="CO₂ warning (ppm)">
-            <input
-              id="co2WarningPpm"
-              type="number"
-              className="bp-input"
-              value={comfort.co2WarningPpm}
-              min={400}
-              onChange={(e) => onUpdate({ comfort: { co2WarningPpm: Number(e.target.value) } })}
             />
           </Field>
         </div>

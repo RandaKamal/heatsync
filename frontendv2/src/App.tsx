@@ -36,9 +36,6 @@ import {
   type SavingsTotals,
 } from './api/client'
 import type { RoomEvent } from './types/campus'
-import { STATUS_COLORS, STATUS_LABELS } from './utils/status'
-
-const legendStatuses = ['normal', 'warming', 'at-risk', 'fault', 'standby'] as const
 
 function App() {
   // ── View state ────────────────────────────────────────────────────────────
@@ -196,6 +193,7 @@ function App() {
         onOptimizeClick={handleOpenOptimize}
         onTechnicianClick={() => setTechOpen((v) => !v)}
         alertCount={criticalAlertCount}
+        notificationCount={notifications.length}
         backendConnected={connected}
       />
 
@@ -218,26 +216,6 @@ function App() {
               <span>Demo Campus</span>
               <span className="demo-campus-label__badge">Simulated</span>
             </div>
-
-            {!selectedRoom && view === 'customer' && (
-              <section className="map-legend glass-panel">
-                <span className="section-eyebrow">Room condition</span>
-                <div className="legend-list">
-                  {legendStatuses.map((status) => (
-                    <div className="legend-item" key={status}>
-                      <span
-                        className="legend-swatch"
-                        style={{
-                          background: STATUS_COLORS[status],
-                          boxShadow: `0 0 12px ${STATUS_COLORS[status]}66`,
-                        }}
-                      />
-                      {STATUS_LABELS[status]}
-                    </div>
-                  ))}
-                </div>
-              </section>
-            )}
 
             {selectedRoom && view === 'customer' && (
               <RoomDetailsPanel
@@ -272,6 +250,7 @@ function App() {
                 notifications={notifications}
                 onContactTechnician={handleContactTechnician}
                 onClose={() => setTechOpen(false)}
+                mode={view === 'service' ? 'service' : 'customer'}
               />
             )}
 

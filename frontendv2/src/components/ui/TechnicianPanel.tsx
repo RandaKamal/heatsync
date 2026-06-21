@@ -43,6 +43,8 @@ interface TechnicianPanelProps {
   notifications: Notification[]
   onContactTechnician: (alert: Alert) => Promise<void>
   onClose: () => void
+  /** 'customer': send alerts to the technician. 'service': receive requests sent by the customer. */
+  mode?: 'customer' | 'service'
 }
 
 const SEV_COLORS: Record<string, string> = {
@@ -86,11 +88,49 @@ function AlertRow({ alert, onContact, sending }: {
   )
 }
 
+function NotificationLog({ notifications }: { notifications: Notification[] }) {
+  return (
+    <div className="tech-content">
+      {notifications.length === 0 ? (
+        <div className="tech-empty">
+          <span>📭</span>
+          <p>No requests from customers yet.</p>
+        </div>
+      ) : (
+        <div className="tech-log-list">
+          {[...notifications].reverse().map((n) => (
+            <article className="tech-log-row" key={n.id}>
+              <div className="tech-log-meta">
+                <time>{n.timestamp.slice(0, 19).replace('T', ' ')}</time>
+                <span
+                  className="tech-log-sev"
+                  style={{ color: SEV_COLORS[n.severity] ?? '#94a3b8' }}
+                >
+                  {n.severity}
+                </span>
+                <span className="tech-log-status">{n.status}</span>
+              </div>
+              <strong>{n.alertType.replace(/_/g, ' ')}</strong>
+              <p>{n.message}</p>
+              {n.diagnosticSteps && n.diagnosticSteps.length > 0 && (
+                <ul className="tech-diag-steps">
+                  {n.diagnosticSteps.map((s, i) => <li key={i}>{s}</li>)}
+                </ul>
+              )}
+            </article>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
 export function TechnicianPanel({
   alerts,
   notifications,
   onContactTechnician,
   onClose,
+  mode = 'customer',
 }: TechnicianPanelProps) {
   const [sendingId, setSendingId] = useState<string | null>(null)
   const [tab, setTab] = useState<'alerts' | 'log'>('alerts')
@@ -103,6 +143,23 @@ export function TechnicianPanel({
     } finally {
       setSendingId(null)
     }
+  }
+
+  if (mode === 'service') {
+    return (
+      <div className="tech-overlay" onClick={onClose}>
+        <div className="tech-panel glass-panel" onClick={(e) => e.stopPropagation()}>
+          <div className="tech-header">
+            <div>
+              <span className="section-eyebrow">Customer requests</span>
+              <h2 className="tech-title">🔔 Notifications</h2>
+            </div>
+            <button type="button" className="pokes-close" onClick={onClose}>×</button>
+          </div>
+          <NotificationLog notifications={notifications} />
+        </div>
+      </div>
+    )
   }
 
   return (
@@ -168,40 +225,7 @@ export function TechnicianPanel({
           </div>
         )}
 
-        {tab === 'log' && (
-          <div className="tech-content">
-            {notifications.length === 0 ? (
-              <div className="tech-empty">
-                <span>📭</span>
-                <p>No notifications sent yet.</p>
-              </div>
-            ) : (
-              <div className="tech-log-list">
-                {[...notifications].reverse().map((n) => (
-                  <article className="tech-log-row" key={n.id}>
-                    <div className="tech-log-meta">
-                      <time>{n.timestamp.slice(0, 19).replace('T', ' ')}</time>
-                      <span
-                        className="tech-log-sev"
-                        style={{ color: SEV_COLORS[n.severity] ?? '#94a3b8' }}
-                      >
-                        {n.severity}
-                      </span>
-                      <span className="tech-log-status">{n.status}</span>
-                    </div>
-                    <strong>{n.alertType.replace(/_/g, ' ')}</strong>
-                    <p>{n.message}</p>
-                    {n.diagnosticSteps && n.diagnosticSteps.length > 0 && (
-                      <ul className="tech-diag-steps">
-                        {n.diagnosticSteps.map((s, i) => <li key={i}>{s}</li>)}
-                      </ul>
-                    )}
-                  </article>
-                ))}
-              </div>
-            )}
-          </div>
-        )}
+        {tab === 'log' && <NotificationLog notifications={notifications} />}
       </div>
     </div>
   )
