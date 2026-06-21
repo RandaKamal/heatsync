@@ -1,4 +1,4 @@
-export type AppView = 'customer' | 'service'
+export type AppView = 'customer' | 'service' | 'profile'
 
 interface TopBarProps {
   view: AppView
@@ -49,6 +49,13 @@ export function TopBar({
             onClick={() => onViewChange('service')}
           >
             LB Energy Service
+          </button>
+          <button
+            type="button"
+            className={`view-toggle__btn ${view === 'profile' ? 'view-toggle__btn--active' : ''}`}
+            onClick={() => onViewChange('profile')}
+          >
+            Building Profile
           </button>
         </div>
 

@@ -10,6 +10,7 @@ __pycache__/
 .coverage.*
 mutants/
 .bg-shell/
+.claude/worktrees/
 # GSD project artifacts are tracked. Keep local/session/runtime/telemetry artifacts out of Git.
 .gsd/runtime/
 .gsd/activity/
@@ -37,6 +38,7 @@ mutants/
 karlskrona/*.wav
 data/
 !backend/data/
+!frontendv2/src/data/
 
 # Large video outputs
 plots/*.mp4

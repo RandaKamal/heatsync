@@ -12,6 +12,7 @@ import { TechnicianPanel } from './components/ui/TechnicianPanel'
 import type { Alert, Notification } from './components/ui/TechnicianPanel'
 import { TopBar } from './components/ui/TopBar'
 import type { AppView } from './components/ui/TopBar'
+import { BuildingProfilePage } from './components/profile/BuildingProfilePage'
 import {
   plannedActions,
   roomLoadHeatmap,
@@ -198,143 +199,149 @@ function App() {
         backendConnected={connected}
       />
 
-      <main className="map-stage">
-        <CampusCanvas
-          rooms={currentRooms}
-          devices={currentDevices}
-          activeFloor="all"
-          selectedRoomId={selectedRoomId}
-          onSelectDevice={handleSelectDevice}
-          onSelectRoom={handleSelectRoom}
-        />
-
-        {/* Demo campus label */}
-        <div className="demo-campus-label">
-          <span>Demo Campus</span>
-          <span className="demo-campus-label__badge">Simulated</span>
-        </div>
-
-        {!selectedRoom && view === 'customer' && (
-          <section className="map-legend glass-panel">
-            <span className="section-eyebrow">Room condition</span>
-            <div className="legend-list">
-              {legendStatuses.map((status) => (
-                <div className="legend-item" key={status}>
-                  <span
-                    className="legend-swatch"
-                    style={{
-                      background: STATUS_COLORS[status],
-                      boxShadow: `0 0 12px ${STATUS_COLORS[status]}66`,
-                    }}
-                  />
-                  {STATUS_LABELS[status]}
-                </div>
-              ))}
-            </div>
-          </section>
-        )}
-
-        {selectedRoom && view === 'customer' && (
-          <RoomDetailsPanel
-            room={selectedRoom}
-            events={roomEvents}
-            savings={roomSavings}
-            energyWindows={roomEnergyWindows}
-            devices={currentDevices}
-            onClose={handleClearSelection}
-            onAddEvent={handleAddEvent}
-            onSelectDevice={handleSelectDevice}
-          />
-        )}
-
-        {pokesOpen && (
-          <PokesPanel totals={impactTotal} onClose={() => setPokesOpen(false)} />
-        )}
-
-        {optimizeOpen && view === 'customer' && (
-          <OptimizeModal
-            suggestion={optimizeSuggestion}
-            loading={optimizeLoading}
-            onAccept={handleAcceptOptimize}
-            onReject={handleRejectOptimize}
-            onClose={handleRejectOptimize}
-          />
-        )}
-
-        {techOpen && (
-          <TechnicianPanel
-            alerts={anomalyAlerts}
-            notifications={notifications}
-            onContactTechnician={handleContactTechnician}
-            onClose={() => setTechOpen(false)}
-          />
-        )}
-
-        {/* Demo scenario button — customer view only */}
-        {view === 'customer' && (
-          simOpen ? (
-            <FailureSimulationPanel
-              status={simulation.status}
-              onStepToNextPhase={simulation.stepToNextPhase}
-              onReset={handleReset}
-              onDismiss={() => setSimOpen(false)}
-            />
-          ) : (
-            <button
-              type="button"
-              onClick={() => setSimOpen(true)}
-              style={{
-                position: 'absolute', bottom: 112, left: 18,
-                display: 'flex', alignItems: 'center', gap: 7,
-                padding: '8px 14px', borderRadius: 8,
-                border: '1px solid rgba(56,189,248,0.28)',
-                background: 'rgba(8,15,32,0.88)',
-                color: '#38bdf8', fontSize: 12, fontWeight: 600,
-                cursor: 'pointer', backdropFilter: 'blur(10px)',
-                transition: 'all 0.15s', boxShadow: '0 4px 16px rgba(0,0,0,0.4)',
-              }}
-            >
-              <span style={{
-                width: 0, height: 0,
-                borderTop: '5px solid transparent',
-                borderBottom: '5px solid transparent',
-                borderLeft: '9px solid #38bdf8',
-                display: 'inline-block',
-              }} />
-              Demo scenario
-            </button>
-          )
-        )}
-
-        {/* Sidebar — view-dependent */}
-        {view === 'customer' ? (
-          <CampusSidebar
-            rooms={currentRooms}
-            devices={currentDevices}
-            selectedDeviceId={selectedDeviceId}
-            buildingTelemetry={simulation.buildingTelemetry}
-            weatherForecast={mockWeatherForecast}
-            roomEvents={roomEvents}
-            controlDecisions={simulation.controlDecisions}
-            roomLoadHeatmap={roomLoadHeatmap}
-            impactByDevice={impactByDevice}
-            onSelectDevice={handleSelectDevice}
-            onClearSelection={handleClearSelection}
-          />
+      <main className={view === 'profile' ? 'bp-stage' : 'map-stage'}>
+        {view === 'profile' ? (
+          <BuildingProfilePage />
         ) : (
-          <ServiceSidebar
-            rooms={backendRooms}
-            stats={stats}
-            scenarios={scenarios}
-            connected={connected}
-            selectedDeviceId={selectedDeviceId}
-            onSelectDevice={handleSelectDevice}
-            onClearSelection={handleClearSelection}
-            onTechnicianClick={() => setTechOpen((v) => !v)}
-          />
-        )}
+          <>
+            <CampusCanvas
+              rooms={currentRooms}
+              devices={currentDevices}
+              activeFloor="all"
+              selectedRoomId={selectedRoomId}
+              onSelectDevice={handleSelectDevice}
+              onSelectRoom={handleSelectRoom}
+            />
 
-        {view === 'customer' && <ControlTimeline actions={plannedActions} />}
+            {/* Demo campus label */}
+            <div className="demo-campus-label">
+              <span>Demo Campus</span>
+              <span className="demo-campus-label__badge">Simulated</span>
+            </div>
+
+            {!selectedRoom && view === 'customer' && (
+              <section className="map-legend glass-panel">
+                <span className="section-eyebrow">Room condition</span>
+                <div className="legend-list">
+                  {legendStatuses.map((status) => (
+                    <div className="legend-item" key={status}>
+                      <span
+                        className="legend-swatch"
+                        style={{
+                          background: STATUS_COLORS[status],
+                          boxShadow: `0 0 12px ${STATUS_COLORS[status]}66`,
+                        }}
+                      />
+                      {STATUS_LABELS[status]}
+                    </div>
+                  ))}
+                </div>
+              </section>
+            )}
+
+            {selectedRoom && view === 'customer' && (
+              <RoomDetailsPanel
+                room={selectedRoom}
+                events={roomEvents}
+                savings={roomSavings}
+                energyWindows={roomEnergyWindows}
+                devices={currentDevices}
+                onClose={handleClearSelection}
+                onAddEvent={handleAddEvent}
+                onSelectDevice={handleSelectDevice}
+              />
+            )}
+
+            {pokesOpen && (
+              <PokesPanel totals={impactTotal} onClose={() => setPokesOpen(false)} />
+            )}
+
+            {optimizeOpen && view === 'customer' && (
+              <OptimizeModal
+                suggestion={optimizeSuggestion}
+                loading={optimizeLoading}
+                onAccept={handleAcceptOptimize}
+                onReject={handleRejectOptimize}
+                onClose={handleRejectOptimize}
+              />
+            )}
+
+            {techOpen && (
+              <TechnicianPanel
+                alerts={anomalyAlerts}
+                notifications={notifications}
+                onContactTechnician={handleContactTechnician}
+                onClose={() => setTechOpen(false)}
+              />
+            )}
+
+            {/* Demo scenario button — customer view only */}
+            {view === 'customer' && (
+              simOpen ? (
+                <FailureSimulationPanel
+                  status={simulation.status}
+                  onStepToNextPhase={simulation.stepToNextPhase}
+                  onReset={handleReset}
+                  onDismiss={() => setSimOpen(false)}
+                />
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => setSimOpen(true)}
+                  style={{
+                    position: 'absolute', bottom: 112, left: 18,
+                    display: 'flex', alignItems: 'center', gap: 7,
+                    padding: '8px 14px', borderRadius: 8,
+                    border: '1px solid rgba(56,189,248,0.28)',
+                    background: 'rgba(8,15,32,0.88)',
+                    color: '#38bdf8', fontSize: 12, fontWeight: 600,
+                    cursor: 'pointer', backdropFilter: 'blur(10px)',
+                    transition: 'all 0.15s', boxShadow: '0 4px 16px rgba(0,0,0,0.4)',
+                  }}
+                >
+                  <span style={{
+                    width: 0, height: 0,
+                    borderTop: '5px solid transparent',
+                    borderBottom: '5px solid transparent',
+                    borderLeft: '9px solid #38bdf8',
+                    display: 'inline-block',
+                  }} />
+                  Demo scenario
+                </button>
+              )
+            )}
+
+            {/* Sidebar — view-dependent */}
+            {view === 'customer' ? (
+              <CampusSidebar
+                rooms={currentRooms}
+                devices={currentDevices}
+                selectedDeviceId={selectedDeviceId}
+                buildingTelemetry={simulation.buildingTelemetry}
+                weatherForecast={mockWeatherForecast}
+                roomEvents={roomEvents}
+                controlDecisions={simulation.controlDecisions}
+                roomLoadHeatmap={roomLoadHeatmap}
+                impactByDevice={impactByDevice}
+                onSelectDevice={handleSelectDevice}
+                onClearSelection={handleClearSelection}
+              />
+            ) : (
+              <ServiceSidebar
+                rooms={backendRooms}
+                stats={stats}
+                scenarios={scenarios}
+                connected={connected}
+                selectedDeviceId={selectedDeviceId}
+                onSelectDevice={handleSelectDevice}
+                onClearSelection={handleClearSelection}
+                onTechnicianClick={() => setTechOpen((v) => !v)}
+              />
+            )}
+
+            {view === 'customer' && <ControlTimeline actions={plannedActions} />}
+          </>
+        )}
       </main>
     </div>
   )
